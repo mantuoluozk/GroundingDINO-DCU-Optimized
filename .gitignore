@@ -169,14 +169,11 @@ checkpoints/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
-build/
+# build/
 dist/
 
 # 忽略你的本地图片或数据集（根据你的实际文件夹名字修改）
 data/
-images/
-*.jpg
-*.png
 
 # 忽略 IDE 配置文件
 .vscode/

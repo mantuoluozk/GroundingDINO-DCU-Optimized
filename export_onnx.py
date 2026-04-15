@@ -26,7 +26,7 @@ def load_model(model_config_path, model_checkpoint_path, cpu_only=False):
 # 加载模型
 model = load_model(config_file, checkpoint_path, cpu_only=True)
 
-# 正式推理时使用的提示词，以及相关的mask
+# 正式推理时使用的提示词，以及相关的mask，可以提前使用get_caption_mask.py生成得到
 caption = "car ."
 input_ids = model.tokenizer([caption], return_tensors="pt")["input_ids"]
 position_ids = torch.tensor([[0, 0, 1, 0]])
@@ -39,10 +39,10 @@ text_token_mask = torch.tensor([[[True, False, False, False],
 
 # 固定输入分辨率
 img = torch.randn(1, 3, 800, 1200)
-img = torch.randn(1, 3, 400, 600)
+# img = torch.randn(1, 3, 400, 600)
 
 # 导出原始ONNX模型
-onnx_output_path = "weights_400x600/ground.onnx"
+onnx_output_path = "weights/ground.onnx"
 simplified_onnx_path = "weights/ground_simplified1.onnx"
 
 
