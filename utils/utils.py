@@ -24,7 +24,8 @@ def preprocess_caption(caption: str):
 def load_image(image_path: str):
     transform = T.Compose(
         [
-            T.RandomResize([800], max_size=1333),
+            # T.RandomResize([800], max_size=1333), # 800x1200输入大小
+            T.RandomResize([400], max_size=1333), # 400x600输入大小
             T.ToTensor(),
             T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
         ]

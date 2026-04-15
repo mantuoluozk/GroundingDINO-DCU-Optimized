@@ -240,7 +240,7 @@ def benchmark_performance(
 
 if __name__ == '__main__':
     # 配置参数
-    model_path = 'weights/ground.onnx'
+    model_path = 'weights_400x600/ground.onnx'
     img_path = 'images/in/car_1.jpg'
     TEXT_PROMPT = "car ."
     BOX_TRESHOLD = 0.35

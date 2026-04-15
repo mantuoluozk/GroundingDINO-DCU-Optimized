@@ -14,7 +14,7 @@ from groundingdino.models.GroundingDINO.bertwarper import generate_masks_with_sp
 
 
 so_options = ort.SessionOptions()
-custom_op_lib_path = "../ort_plugin/build/libms_deform_attn_ort.so" 
+custom_op_lib_path = "../ort_plugin_fp16/build/libms_deform_attn_ort.so" 
 so_options.register_custom_ops_library(custom_op_lib_path)
 # 开启ort优化
 so_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
@@ -245,7 +245,14 @@ def benchmark_performance(
 
 if __name__ == '__main__':
     # 配置参数
-    model_path = '../weights/ground_deform_fp16.onnx'
+    model_path = '../weights_400x600/ground_deform_fp16.onnx'
+    """
+        ../weights/ground_deform.onnx 普通版本
+        ../weights/ground_deform_sim.onnx 简化版本
+        ../weights/ground_deform_fp16.onnx FP16版本(其中自定义算子fp32)
+        ../weights/ground_deform_fp16_all.onnx 纯FP16版本
+        ../weights/ground_deform_400x600.onnx 图像尺度400x600版本
+    """
     img_path = '../images/in/car_1.jpg'
     TEXT_PROMPT = "car ."
     BOX_TRESHOLD = 0.35
@@ -324,8 +331,8 @@ if __name__ == '__main__':
         )
 
     # 保存结果
-    cv2.imwrite('./images/out/result.jpg', ori_img)
-    print(f"\n✅ 结果已保存至: ./images/out/result.jpg")
+    cv2.imwrite('./result.jpg', ori_img)
+    print(f"\n✅ 结果已保存至: ./result.jpg")
     print(f"✅ 检测到目标: {phrases} (共 {len(boxes)} 个)")
 
     # profile_file = ort_session.end_profiling()

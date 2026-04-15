@@ -39,9 +39,10 @@ text_token_mask = torch.tensor([[[True, False, False, False],
 
 # 固定输入分辨率
 img = torch.randn(1, 3, 800, 1200)
+img = torch.randn(1, 3, 400, 600)
 
 # 导出原始ONNX模型
-onnx_output_path = "weights/ground.onnx"
+onnx_output_path = "weights_400x600/ground.onnx"
 simplified_onnx_path = "weights/ground_simplified1.onnx"
 
 
