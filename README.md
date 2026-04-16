@@ -80,10 +80,10 @@ python onnx_inference1.py
 
 ## 5. 进阶：带自定义算子 (ms_deform_attn) 的 ORT 推理
 
-为了进一步优化性能，我们实现了 `ms_deform_attn` 的自定义算子，并提供了多种优化方案（含 FP16）。
+为了进一步优化性能，实现了 `ms_deform_attn` 的自定义算子，并提供了多种优化方案（含 FP16）。
 
 ### 5.1 编译自定义算子
-根据需求选择对应的算子实现目录（支持的方案包括：`ort_plugin`, `ort_plugin_fp16`, `ort_plugin_fp16_B`, `ort_plugin_fp16_C`）。
+根据需求选择对应的算子实现目录（支持的方案包括：`ort_plugin`, `ort_plugin_fp16`, `ort_plugin_fp16_B`, `ort_plugin_fp16_C`），推荐使用`ort_plugin`（fp32算子实现）和`ort_plugin_fp16_C`（fp16算子实现）。
 
 以 `ort_plugin` 为例进行编译：
 ```bash
@@ -92,7 +92,7 @@ mkdir build && cd build
 cmake ..
 make
 ```
-编译成功后，将在该目录下生成动态链接库 `libms_deform_attn_ort.so`。
+编译成功后，将在该目录下生成动态链接库 `libms_deform_attn_ort.so`，后续只需要在推理脚本中更改so文件位置。
 
 ### 5.2 导出与优化模型
 进入 deform 推理工作区：
@@ -136,3 +136,10 @@ batchsize=1
 | ORT + Deform Plugin | FP16 混合精度量化（ort_plugin） | 5 | 10 | 95.17 | 10.5 |
 | ORT + Deform Plugin | 纯FP16 方案 B（ort_plugin_fp16_B） | 5 | 10 | 87.34| 11.44 |
 | ORT + Deform Plugin | 纯FP16 方案 C（ort_plugin_fp16_C） | 5 | 10 | 84.52 | 11.82 |
+
+## 参考项目
+
+本项目在开发过程中参考了以下优秀开源项目，在此表示感谢：
+
+- [**GroundingDINO**](https://github.com/IDEA-Research/GroundingDINO) - GroundingDINO 官方仓库，提供基础模型与算法实现。
+- [**GroundingDINO-TensorRT-and-ONNX-Inference**](https://github.com/wingdzero/GroundingDINO-TensorRT-and-ONNX-Inference) - 提供了 GroundingDINO 的 TensorRT 及 ONNX 推理部署参考实现。
