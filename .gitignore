@@ -158,6 +158,7 @@ tmp/
 xiongke_log.txt
 migraphx_log.txt
 weights/
+weights_400x600/
 checkpoints/
 
 # 忽略环境安装包

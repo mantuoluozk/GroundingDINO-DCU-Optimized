@@ -54,8 +54,8 @@ torch.onnx.export(
     output_names=["logits", "boxes"],
     dynamic_axes=None, # 静态维度导出
     opset_version=17,
-    verbose=False  # 关闭详细日志，如需调试可改为True
-    # do_constant_folding=True  # 常量折叠优化，提升简化效果
+    verbose=False,  # 关闭详细日志，如需调试可改为True
+    do_constant_folding=True  # 常量折叠优化，提升简化效果
 )
 print(f"ONNX模型已成功导出到: {onnx_output_path}")
 
