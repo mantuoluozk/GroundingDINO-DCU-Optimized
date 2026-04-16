@@ -1,6 +1,6 @@
-### 该文件夹下均为自定义算子版本相关脚本
+# 该文件夹下均为自定义算子版本相关脚本
 
-### 默认图像大小800x1200
+## 1.默认图像大小800x1200
 
 1. 导出onnx
 ```bash
@@ -20,10 +20,10 @@ python onnx_inference_deform_optim.py
 ```
 5. 优化版本ort推理+iobinding(该项目下无提升)
 ```bash
-python onnx_inference_deform_optim_iobinding.py # 
+python onnx_inference_deform_optim_iobinding.py 
 ```
 
-### 当模型图像输入改为400x600
+## 2.当模型图像输入改为400x600
 
 1. 先修改export_onnx_deform.py中
 ```bash
