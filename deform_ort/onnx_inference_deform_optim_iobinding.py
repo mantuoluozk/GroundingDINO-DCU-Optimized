@@ -7,6 +7,9 @@ import onnxruntime as ort
 import bisect
 import time
 import os
+from typing import Tuple
+import groundingdino.datasets.transforms as T
+from PIL import Image
 """
 针对模型前后处理和代码结构进行优化
 1.预测结果获取优化prediction_logits = sigmoid(outputs[0][0])
@@ -14,13 +17,27 @@ import os
 3.IO binding优化
 """
 
-from groundingdino.util.inference import load_image
-
 so_options = ort.SessionOptions()
-custom_op_lib_path = "../ort_plugin/build/libms_deform_attn_ort.so" 
+# 如何想要查看ORT的详细日志，可以取消下面这行的注释，并设置合适的日志级别
+# so_options.enable_profiling = True
+custom_op_lib_path = "../ort_plugin_fp16_C/build/libms_deform_attn_ort.so" 
 so_options.register_custom_ops_library(custom_op_lib_path)
 # 开启ort优化
 so_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+
+def load_image(image_path: str) -> Tuple[np.array, torch.Tensor]:
+    transform = T.Compose(
+        [
+            T.RandomResize([800], max_size=1333),
+            # T.RandomResize([400], max_size=1333),
+            T.ToTensor(),
+            T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        ]
+    )
+    image_source = Image.open(image_path).convert("RGB")
+    image = np.asarray(image_source)
+    image_transformed, _ = transform(image_source, None)
+    return image, image_transformed
 
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
@@ -67,20 +84,17 @@ def predict(
 
     t0 = time.time()
 
-    # 1. 仅仅绑定当前这帧发生变化的图片！其他文本输入早就在显存里躺好了。
+    # 1. 仅仅绑定当前这帧发生变化的图片，其他文本输入绑定好了
     img_tensor = np.expand_dims(np.asarray(image), axis=0)
+    # 尝试输入进行fp16转换，导出onnx时输入转换为fp16，但是推理性能下降了
+    # img_tensor = np.expand_dims(np.asarray(image), axis=0).astype(np.float16)
     io_binding.bind_cpu_input('img', img_tensor)
-        
-    # 2. 绑定需要获取的输出
-    io_binding.bind_output('logits')
-    io_binding.bind_output('boxes')
     
-    # 3. 极速执行推理
+    # 2. 执行推理
     ort_session.run_with_iobinding(io_binding)
-    ort_outputs = io_binding.copy_outputs_to_cpu()
 
-    # 清空输出绑定，否则下一次循环会内存泄漏报错
-    io_binding.clear_binding_outputs()
+    # 3. 结果从GPU 复制回 CPU
+    ort_outputs = io_binding.copy_outputs_to_cpu()
 
     infer_time = time.time() - t0
     if not is_benchmark:
@@ -204,7 +218,7 @@ def benchmark_performance(
 
 if __name__ == '__main__':
     # 配置参数
-    model_path = '../weights/ground_deform_fp16.onnx'
+    model_path = '../weights_opt/ground_deform_opt_fp16_all.onnx'
     img_path = '../images/in/car_1.jpg'
     TEXT_PROMPT = "car ."
     BOX_TRESHOLD = 0.35
@@ -240,6 +254,9 @@ if __name__ == '__main__':
     static_keys = ['input_ids', 'attention_mask', 'position_ids', 'token_type_ids', 'text_token_mask']
     for key in static_keys:
         io_binding.bind_cpu_input(key, TEXT_CACHE[key])
+
+    io_binding.bind_output('logits')
+    io_binding.bind_output('boxes')
 
     # 第一步：运行完整的性能测试（预热+实际推理）
     performance_result = benchmark_performance(
@@ -281,6 +298,6 @@ if __name__ == '__main__':
         )
 
     # 保存结果
-    cv2.imwrite('./images/out/result.jpg', ori_img)
-    print(f"\n✅ 结果已保存至: ./images/out/result.jpg")
+    cv2.imwrite('../images/out/result.jpg', ori_img)
+    print(f"\n✅ 结果已保存至: ../images/out/result.jpg")
     print(f"✅ 检测到目标: {phrases} (共 {len(boxes)} 个)")

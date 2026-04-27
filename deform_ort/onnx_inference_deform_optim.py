@@ -7,19 +7,34 @@ import onnxruntime as ort
 import bisect
 import time
 import os
+from typing import Tuple
+import groundingdino.datasets.transforms as T
+from PIL import Image
 """
     针对模型前后处理和代码结构进行优化
         1.预测结果获取优化prediction_logits = sigmoid(outputs[0][0])
         2.输入数据提前获取直接传入，移除了对tokenizer的依赖
 """
 
-from groundingdino.util.inference import load_image
-
 so_options = ort.SessionOptions()
-custom_op_lib_path = "../ort_plugin/build/libms_deform_attn_ort.so" 
+custom_op_lib_path = "../ort_plugin_fp16_C/build/libms_deform_attn_ort.so" 
 so_options.register_custom_ops_library(custom_op_lib_path)
 # 开启ort优化
 so_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+
+def load_image(image_path: str) -> Tuple[np.array, torch.Tensor]:
+    transform = T.Compose(
+        [
+            T.RandomResize([800], max_size=1333),
+            # T.RandomResize([400], max_size=1333),
+            T.ToTensor(),
+            T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        ]
+    )
+    image_source = Image.open(image_path).convert("RGB")
+    image = np.asarray(image_source)
+    image_transformed, _ = transform(image_source, None)
+    return image, image_transformed
 
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
@@ -180,7 +195,7 @@ def benchmark_performance(
 
 if __name__ == '__main__':
     # 配置参数
-    model_path = '../weights_400x600/ground_deform.onnx'
+    model_path = '../weights/ground_deform_fp16_all.onnx'
     """
         ../weights/ground_deform.onnx 普通版本
         ../weights/ground_deform_sim.onnx 简化版本
@@ -264,6 +279,6 @@ if __name__ == '__main__':
         )
 
     # 保存结果
-    cv2.imwrite('./result.jpg', ori_img)
-    print(f"\n✅ 结果已保存至: ./result.jpg")
+    cv2.imwrite('../weights/result.jpg', ori_img)
+    print(f"\n✅ 结果已保存至: ../weights/result.jpg")
     print(f"✅ 检测到目标: {phrases} (共 {len(boxes)} 个)")

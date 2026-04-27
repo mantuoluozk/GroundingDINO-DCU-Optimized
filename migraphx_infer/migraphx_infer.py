@@ -57,7 +57,7 @@ def _mgx_shape_to_numpy(shape):
 # 🚀 MIGraphX 推理类（带缓存）
 # =========================
 class MIGraphXModel:
-    def __init__(self, onnx_path, cache_path="weights/ground.mxr", force_recompile=False):
+    def __init__(self, onnx_path, cache_path="weights/ground_opt.mxr", force_recompile=False):
         self.cache_path = cache_path
 
         # ====== 优先加载缓存 ======
@@ -228,10 +228,10 @@ def benchmark(model, tokenizer, image, caption, box_th, text_th, warmup=5, runs=
 # =========================
 if __name__ == "__main__":
 
-    model_path = "weights/ground_simplified.onnx"
-    cache_path = "weights/ground_simplified.mxr"   # ⭐ 缓存文件
+    model_path = "../weights/ground_opt.onnx"
+    cache_path = "../weights/ground_opt.mxr"   # ⭐ 缓存文件
 
-    img_path = "images/in/car_1.jpg"
+    img_path = "../images/in/car_1.jpg"
 
     TEXT_PROMPT = "car ."
     BOX_TRESHOLD = 0.35

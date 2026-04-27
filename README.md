@@ -157,7 +157,7 @@ python onnx_inference_deform_optim.py
 
 如需使用更低分辨率的图像输入（如 400x800）以进一步加速推理，可按以下步骤操作：
 
-### 6.1 修改导出脚本
+1. 修改导出脚本
 
 编辑 `deform_ort/export_onnx_deform.py`，修改图像尺寸与导出路径：
 
@@ -169,7 +169,7 @@ img = torch.randn(1, 3, 400, 800).to(device)
 onnx_output_path = "../weights_400x800/ground_deform.onnx"
 ```
 
-### 6.2 正常导出并量化
+2. 正常导出并量化
 
 ```bash
 cd deform_ort
@@ -177,7 +177,7 @@ python export_onnx_deform.py
 python onnx_optimize.py
 ```
 
-### 6.3 修改推理预处理分辨率
+3. 修改推理预处理分辨率
 
 编辑 `groundingdino/util/inference.py` 中的 `load_image` 函数，将 `RandomResize` 的参数从 800 改为 400：
 
@@ -186,7 +186,7 @@ python onnx_optimize.py
 T.RandomResize([400], max_size=1333),
 ```
 
-### 6.4. 执行 ORT 推理
+4. 执行 ORT 推理
 
 运行推理脚本，并确保代码中的 ONNX 模型路径指向 `weights_400x800/` 下对应的模型文件：
 
@@ -198,7 +198,26 @@ python onnx_inference_deform_optim.py
 
 -----
 
-## 7\. 测试结果对比
+## 7\. migraphx推理
+
+1. 进入migraphx_infer文件夹
+```bash
+cd migraphx_infer
+```
+
+2. 运行转换onnx脚本
+将简化后的onnx转换为要用migraphx推理的onnx
+```bash
+bash migraphx_export.bash
+```
+
+3. 如果已经得到了mxr文件，直接测试
+```bash
+bash migraphx_perf.bash
+```
+
+-----
+## 8\. 测试结果对比
 
 *以下测试均包含 5 轮预热（Warmup）和 10 轮正式测试。*
 
@@ -208,7 +227,7 @@ python onnx_inference_deform_optim.py
 >   * **模型文件**：默认存放于 `../weights/` 目录下。
 >   * **自定义算子目录**：对应的完整动态库路径均为 `../[目录名]/build/libms_deform_attn_ort.so`。
 
-### 7.1 BW150 测试结果
+### 8.1 ORT BW150 测试结果
 
 单张 BW150 卡，图像输入 800x1200，Batch Size = 1
 
@@ -221,7 +240,7 @@ python onnx_inference_deform_optim.py
 | **ORT + Plugin** | +自定义算子<br>+FP16 纯量化方案 B | `ground_deform_fp16_all.onnx` | `ort_plugin_fp16_B` | 87.34 | 11.44 |
 | **ORT + Plugin** | +自定义算子<br>+FP16 极致优化方案 C | `ground_deform_fp16_all.onnx` | `ort_plugin_fp16_C` | 84.52 | 11.82 |
 
-### 7.2 BW100 测试结果
+### 8.2 ORT BW100 测试结果
 
 单张 BW100 卡，图像输入 800x1200，Batch Size = 1
 
@@ -233,11 +252,22 @@ python onnx_inference_deform_optim.py
 | **ORT + Plugin** | +自定义算子<br>+FP16 纯量化方案 B | `ground_deform_fp16_all.onnx` | `ort_plugin_fp16_B` | 105.35 | 9.49 |
 | **ORT + Plugin** | +自定义算子<br>+FP16 极致优化方案 C | `ground_deform_fp16_all.onnx` | `ort_plugin_fp16_C` | 100.91 | 9.90 |
 
+### 8.3 migraphx BW100 测试结果
+```
+Batch size: 1
+Rate: 6.05197 inferences/sec
+Total time: 165.235ms (Min: 165.115ms, Max: 165.535ms, 
+Mean: 165.258ms, Median: 165.225ms)
+Percentiles (90%, 95%, 99%): (165.358ms, 165.358ms, 165.358ms)
+Total instructions time: 205.275ms
+Overhead time: 2.32812ms, -40.0399ms
+Overhead: 1%, -24%
+```
 -----
 
 ## 参考项目
 
-本项目在开发过程中参考了以下优秀开源项目，在此表示感谢：
+本项目在开发过程中参考了以下开源项目：
 
   - [**GroundingDINO**](https://github.com/IDEA-Research/GroundingDINO) - GroundingDINO 官方仓库，提供基础模型与算法实现。
   - [**GroundingDINO-TensorRT-and-ONNX-Inference**](https://github.com/wingdzero/GroundingDINO-TensorRT-and-ONNX-Inference) - 提供了 GroundingDINO 的 TensorRT 及 ONNX 推理部署参考实现。
