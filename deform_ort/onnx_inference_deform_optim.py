@@ -214,6 +214,7 @@ if __name__ == '__main__':
     image_source, image = load_image(img_path)
 
     providers = [
+        # 'MIGraphXExecutionProvider',
         'ROCMExecutionProvider', 
         'CPUExecutionProvider'
     ]

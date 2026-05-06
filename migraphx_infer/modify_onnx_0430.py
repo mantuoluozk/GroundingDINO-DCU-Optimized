@@ -30,123 +30,37 @@ def change_inf_to_value(om: ONNXModifier):
             records.add(init_name)
 
 
-# def optimize_where_ndoes(om: ONNXModifier):
-#     """Where节点等价替换
-#     (1) condition为initializer, X为0, Y为输入数据:
-#         Where(cond, X, Y) ==> Mul(Y, ~cond)
-#     (2) condition为initializer, X为负无穷, Y为输入数据
-#         Where(cond, X, Y) ==>  Sub(Y, Where(cond, np.inf, 0))
-#     (3) condition为真实输入, X为负无穷, Y为输入数据
-#         Where(cond, X, Y) ==> Sub(Y, Mul(Cast(cond, to=float32), np.inf))
-
-#     cases:
-#         1. Where(cond, -inf, input)
-#             a. /transformer/encoder/fusion_layers.*/attn/Where 
-#             b. /transformer/encoder/fusion_layers.*/attn/Where_1
-#             c. /class_embed.0_*/Where: Where(cond, -inf, input)
-#         2. Where(cond, 0, input):
-#             a. /transformer/encoder/layers.*/self_attn/Where
-#             b. /transformer/decoder/layers.*/cross_attn/Where
-#     """
-
-#     for where_node in om.get_nodes("Where"):
-#         where_name = where_node.name
-#         # print("Process where node:", where_name)
-#         x_value = om.get_initializer_value(where_node.inputs[1])
-#         assert x_value.size == 1
-#         assert x_value == np.array(0.0, dtype=np.float32) or \
-#             x_value == np.array(-np.inf, dtype=np.float32)
-
-#         cond_init = om.get_initializer(where_node.inputs[0])
-#         if cond_init is not None:
-#             cond_value = om.get_initializer_value(where_node.inputs[0])
-#             if x_value == np.array(0.0, dtype=np.float32):
-#                 # Where(cond, X, Y) ==> Mul(Y, ~cond)
-#                 mul_name = where_name.replace("Where", "NewMul")
-#                 mul_b_init = om.create_initializer(mul_name + "_B", 
-#                                                    (~cond_value).astype(np.float32))
-#                 mul_node = om.create_node("Mul", 
-#                                           mul_name, 
-#                                           [where_node.inputs[2], mul_b_init.name], 
-#                                           [mul_name+"_output_0"], 
-#                                           index=where_node.index)
-#                 next_nodes = where_node.next_nodes
-#                 for next_node in next_nodes:
-#                     next_node.replace_input(where_node.outputs[0], mul_node.outputs[0])
-#             elif x_value == np.array(-np.inf, dtype=np.float32):
-#                 # Where(cond, X, Y) ==>  Sub(Y, Where(cond, np.inf, 0))
-#                 sub_name = where_name.replace("Where", "NewSub")
-#                 sub_b_init = om.create_initializer(
-#                     sub_name + "_B", 
-#                     np.where(cond_value.astype(np.float32), 
-#                              np.finfo(np.float16).max, 0.0).astype(np.float32)
-#                 )
-#                 sub_node = om.create_node("Sub", 
-#                                           sub_name, 
-#                                           [where_node.inputs[2], sub_b_init.name], 
-#                                           [sub_name+"_output_0"], 
-#                                           index=where_node.index)
-#                 next_nodes = where_node.next_nodes
-#                 for next_node in next_nodes:
-#                     next_node.replace_input(where_node.outputs[0], sub_node.outputs[0])
-#         else:
-#             # Where(cond, X, Y) ==> Sub(Y, Mul(Cast(cond, to=float32), np.inf))
-#             assert x_value == np.array(-np.inf, dtype=np.float32)
-#             cast_name = where_name.replace("Where", "NewCast")
-#             mul_name = where_name.replace("Where", "NewMul")
-#             sub_name = where_name.replace("Where", "NewSub")
-#             cast_node = om.create_node("Cast", 
-#                                        cast_name, 
-#                                        [where_node.inputs[0]], 
-#                                        [cast_name+"_output_0"], 
-#                                        to=1, 
-#                                        index=where_node.index)
-#             mul_b_init = om.create_initializer(mul_name + "_B", 
-#                                                np.array([np.finfo(np.float16).max], np.float32))
-#             mul_node = om.create_node("Mul", 
-#                                       mul_name, 
-#                                       [cast_node.outputs[0], mul_b_init.name], 
-#                                       [mul_name+"_output_0"], 
-#                                       index=cast_node.index+1)
-#             sub_node = om.create_node("Sub", 
-#                                       sub_name, 
-#                                       [where_node.inputs[2], mul_node.outputs[0]], 
-#                                       [sub_name+"_output_0"], 
-#                                       index=mul_node.index+1)
-#             next_nodes = where_node.next_nodes
-#             for next_node in next_nodes:
-#                 next_node.replace_input(where_node.outputs[0], sub_node.outputs[0])
-    
-#     om.update_map()
-
 def optimize_where_ndoes(om: ONNXModifier):
-    """Where节点等价替换 (加入安全校验版本)"""
+    """Where节点等价替换
+    (1) condition为initializer, X为0, Y为输入数据:
+        Where(cond, X, Y) ==> Mul(Y, ~cond)
+    (2) condition为initializer, X为负无穷, Y为输入数据
+        Where(cond, X, Y) ==>  Sub(Y, Where(cond, np.inf, 0))
+    (3) condition为真实输入, X为负无穷, Y为输入数据
+        Where(cond, X, Y) ==> Sub(Y, Mul(Cast(cond, to=float32), np.inf))
+
+    cases:
+        1. Where(cond, -inf, input)
+            a. /transformer/encoder/fusion_layers.*/attn/Where 
+            b. /transformer/encoder/fusion_layers.*/attn/Where_1
+            c. /class_embed.0_*/Where: Where(cond, -inf, input)
+        2. Where(cond, 0, input):
+            a. /transformer/encoder/layers.*/self_attn/Where
+            b. /transformer/decoder/layers.*/cross_attn/Where
+    """
 
     for where_node in om.get_nodes("Where"):
         where_name = where_node.name
-        
-        # 1. 安全获取 X 的值，如果 X 不是常量（initializer），直接跳过不优化
-        x_init = om.get_initializer(where_node.inputs[1])
-        if x_init is None:
-            continue
-            
+        # print("Process where node:", where_name)
         x_value = om.get_initializer_value(where_node.inputs[1])
-        
-        # 2. 避免 assert 崩溃：如果 size 不为 1，说明不是我们要找的 Attention Mask 节点，跳过
-        if x_value.size != 1:
-            continue
-            
-        # 3. 判断是否符合优化条件（0.0 或 -inf），不符合直接跳过
-        is_zero = (x_value == np.array(0.0, dtype=np.float32))
-        is_neg_inf = (x_value == np.array(-np.inf, dtype=np.float32))
-        
-        if not (is_zero or is_neg_inf):
-            continue
+        assert x_value.size == 1
+        assert x_value == np.array(0.0, dtype=np.float32) or \
+            x_value == np.array(-np.inf, dtype=np.float32)
 
         cond_init = om.get_initializer(where_node.inputs[0])
         if cond_init is not None:
             cond_value = om.get_initializer_value(where_node.inputs[0])
-            if is_zero:
+            if x_value == np.array(0.0, dtype=np.float32):
                 # Where(cond, X, Y) ==> Mul(Y, ~cond)
                 mul_name = where_name.replace("Where", "NewMul")
                 mul_b_init = om.create_initializer(mul_name + "_B", 
@@ -159,7 +73,7 @@ def optimize_where_ndoes(om: ONNXModifier):
                 next_nodes = where_node.next_nodes
                 for next_node in next_nodes:
                     next_node.replace_input(where_node.outputs[0], mul_node.outputs[0])
-            elif is_neg_inf:
+            elif x_value == np.array(-np.inf, dtype=np.float32):
                 # Where(cond, X, Y) ==>  Sub(Y, Where(cond, np.inf, 0))
                 sub_name = where_name.replace("Where", "NewSub")
                 sub_b_init = om.create_initializer(
@@ -177,10 +91,7 @@ def optimize_where_ndoes(om: ONNXModifier):
                     next_node.replace_input(where_node.outputs[0], sub_node.outputs[0])
         else:
             # Where(cond, X, Y) ==> Sub(Y, Mul(Cast(cond, to=float32), np.inf))
-            # 当 condition 不是 initializer 时，只处理 -inf 的情况
-            if not is_neg_inf:
-                continue
-                
+            assert x_value == np.array(-np.inf, dtype=np.float32)
             cast_name = where_name.replace("Where", "NewCast")
             mul_name = where_name.replace("Where", "NewMul")
             sub_name = where_name.replace("Where", "NewSub")
@@ -207,6 +118,7 @@ def optimize_where_ndoes(om: ONNXModifier):
                 next_node.replace_input(where_node.outputs[0], sub_node.outputs[0])
     
     om.update_map()
+
 
 def optimize_transpose_nodes(om: ONNXModifier):
     transpose_list = [
@@ -256,64 +168,50 @@ def optimize_transpose_nodes(om: ONNXModifier):
     ]
     for name in transpose_list:
         node = om.get_node(name)
-        # 安全校验：如果找不到这个节点，说明当前模型不需要优化这个点，跳过
-        if node is None:
-            continue
-        
-        if 'perm' in node.attrs and (node.attrs['perm'] == [1, 0 , 2] or node.attrs['perm'] == [1, 0 , 2, 3]):
-            next_nodes = om.get_next_nodes(node)
-            for node_ in next_nodes:
-                node_.replace_input(node.outputs[0], node.inputs[0])
+        assert node.attrs['perm'] == [1, 0 , 2] or node.attrs['perm'] == [1, 0 , 2, 3], \
+            f"perm={node.attrs['perm']}"
+        next_nodes = om.get_next_nodes(node)
+        for node_ in next_nodes:
+            node_.replace_input(node.outputs[0], node.inputs[0])
 
     # modify /transformer/encoder/text_layers.*/self_attn/Reshape_4
+    # om.set_initializer_value("_v_8735", np.array([-1, 4, 256], np.int64))
     shape_init1 = om.create_initializer(
         "/transformer/encoder/text_layers.x/self_attn/des_shape", 
         np.array([1, 4, 256], np.int64)
     )
     for i in range(6):
         reshape_node = om.get_node(f"/transformer/encoder/text_layers.{i}/self_attn/Reshape_4")
-        if reshape_node is not None:
-            reshape_node.set_input(1, shape_init1.name)
+        reshape_node.set_input(1, shape_init1.name)
 
     # modify /transformer/enc_out_class_embed/Transpose
-    trans_node = om.get_node("/transformer/enc_out_class_embed/Transpose")
-    if trans_node is not None:
-        trans_node.set_attribute("perm", [0, 2, 1])
+    om.get_node("/transformer/enc_out_class_embed/Transpose").set_attribute("perm", [0, 2, 1])
 
-    # modify /transformer/decoder/Reshape_* # 安全校验：避免写死的随机变量名 _v_5525 引发崩溃
-    init_5525 = om.get_initializer("_v_5525")
-    if init_5525 is not None:
-        om.set_initializer_value("_v_5525", np.array([1, 900, -1], np.int64))
+    # modify /transformer/decoder/Reshape_*
+    om.set_initializer_value("_v_5525", np.array([1, 900, -1], np.int64))
 
     # modify /transformer/decoder/layers.*/self_attn/Reshape_4
     # modify /transformer/decoder/layers.*/ca_text/Reshape_6
+    # om.set_initializer_value("_v_6230", np.array([-1, 900, 256], np.int64))
     shape_init3 = om.create_initializer(
         "/transformer/decoder/layers.x/self_attn_ca_text/des_shape", 
         np.array([1, 900, 256], np.int64)
     )
     for i in range(6):
         reshape_node1 = om.get_node(f"/transformer/decoder/layers.{i}/self_attn/Reshape_4")
-        if reshape_node1 is not None:
-            reshape_node1.set_input(1, shape_init3.name)
+        reshape_node1.set_input(1, shape_init3.name)
         reshape_node2 = om.get_node(f"/transformer/decoder/layers.{i}/ca_text/Reshape_6")
-        if reshape_node2 is not None:
-            reshape_node2.set_input(1, shape_init3.name)
+        reshape_node2.set_input(1, shape_init3.name)
     
     # modify /transformer/decoder/layers.0/Add
     # modify /transformer/decoder/layers.0/Add_1
     init_name = "/transformer/Tile_1_output_0"
-    tile_init = om.get_initializer(init_name)
-    if tile_init is not None:
-        add_value = om.get_initializer_value(init_name)
-        om.set_initializer_value(init_name, np.ascontiguousarray(add_value.transpose(1, 0, 2)))
+    add_value = om.get_initializer_value(init_name)
+    om.set_initializer_value(init_name, np.ascontiguousarray(add_value.transpose(1, 0, 2)))
     
     om.update_map()
-    
-    # 将形状推断包起来，防止自定义算子（MSDeformAttn）导致推理失败崩溃
-    try:
-        om.infer_shape(strict_mode=False)
-    except Exception as e:
-        print(f"[Warning] infer_shape 跳过 (可能由于自定义算子引起). 详细信息: {e}")
+    om.infer_shape()
+
 
 def optmize_sin_cos_block(om: ONNXModifier):
     node_pairs = [
@@ -325,87 +223,94 @@ def optmize_sin_cos_block(om: ONNXModifier):
         ("/transformer/decoder/Gather_26", "/transformer/decoder/ref_point_head/layers.0_5/MatMul"),
     ]
     
-    # 提前创建一些公用的 initializer
-    unsqueeze_axes_init1 = om.create_initializer("/transformer/decoder/sin_cos_block/unsqueeze_axes1", np.array([3, 4], np.int64))
-    slice_axes_init = om.create_initializer("/transformer/decoder/sin_cos_block/slice_axes", np.array([4], np.int64))
-    slice_steps_init = om.create_initializer("/transformer/decoder/sin_cos_block/slice_steps", np.array([1], np.int64))
-    slice_starts_init1 = om.create_initializer("/transformer/decoder/sin_cos_block/slice_starts1", np.array([0], np.int64))
-    slice_ends_init1 = om.create_initializer("/transformer/decoder/sin_cos_block/slice_ends1", np.array([1], np.int64))
-    slice_starts_init2 = om.create_initializer("/transformer/decoder/sin_cos_block/slice_steps2", np.array([1], np.int64))
-    slice_ends_init2 = om.create_initializer("/transformer/decoder/sin_cos_block/slice_ends2", np.array([2], np.int64))
-    reshape_init = om.create_initializer("/transformer/decoder/sin_cos_block/reshape_dst_shape", np.array([1, 900, -1], np.int64))
+    unsqueeze_axes_init1 = om.create_initializer(
+        "/transformer/decoder/sin_cos_block/unsqueeze_axes1",
+        np.array([3, 4], np.int64)
+    )
+    slice_axes_init = om.create_initializer(
+        "/transformer/decoder/sin_cos_block/slice_axes",
+        np.array([4], np.int64)
+    )
+    slice_steps_init = om.create_initializer(
+        "/transformer/decoder/sin_cos_block/slice_steps",
+        np.array([1], np.int64)
+    )
+    slice_starts_init1 = om.create_initializer(
+        "/transformer/decoder/sin_cos_block/slice_starts1",
+        np.array([0], np.int64)
+    )
+    slice_ends_init1 = om.create_initializer(
+        "/transformer/decoder/sin_cos_block/slice_ends1",
+        np.array([1], np.int64)
+    )
+    slice_starts_init2 = om.create_initializer(
+        "/transformer/decoder/sin_cos_block/slice_steps2",
+        np.array([1], np.int64)
+    )
+    slice_ends_init2 = om.create_initializer(
+        "/transformer/decoder/sin_cos_block/slice_ends2",
+        np.array([2], np.int64)
+    )
+    reshape_init = om.create_initializer(
+        "/transformer/decoder/sin_cos_block/reshape_dst_shape",
+        np.array([1, 900, -1], np.int64)
+    )
     
     for i, (gather_name, matmul_name) in enumerate(node_pairs):
         gather_node = om.get_node(gather_name)
+        next_node = om.get_next_nodes(gather_node)[0]
+        assert next_node.op_type == "Mul", f"{next_node.op_type} {next_node.name}"
+        mul_init_value = om.get_initializer_value(next_node.inputs[1])
+        assert mul_init_value.size == 1
+        next_node = om.get_next_nodes(next_node)[0]
+        assert next_node.op_type == "Unsqueeze"
+        next_node.set_inputs([gather_node.inputs[0], unsqueeze_axes_init1.name])
+        next_node = om.get_next_nodes(next_node)[0]
+        assert next_node.op_type == "Div"
+        div_init_value = om.get_initializer_value(next_node.inputs[1])
+        new_value = (div_init_value / mul_init_value).reshape(1, 1, 1, 64, 2)
+        new_init = om.create_initializer(next_node.name + "_B", new_value)
+        next_node.set_input(1, new_init.name)
+
+        next_nodes = om.get_next_nodes(next_node)
+        assert len(next_nodes) == 2 and all(x.op_type == 'Slice' for x in next_nodes)
+        sin_node, cos_node = None, None
+        for j, slice_node in enumerate(next_nodes):
+            slice_node.set_inputs([slice_node.inputs[0], 
+                                   slice_starts_init1.name if j == 0 else slice_starts_init2.name,
+                                   slice_ends_init1.name if j == 0 else slice_ends_init2.name,
+                                   slice_axes_init.name,
+                                   slice_steps_init.name])
+            next_node = om.get_next_nodes(slice_node)[0]
+            if next_node.op_type == "Sin":
+                sin_node = next_node
+            elif next_node.op_type == "Cos":
+                cos_node = next_node
+            else:
+                raise RuntimeError("match fail!")
+            next_node = om.get_next_nodes(next_node)[0]
+            assert next_node.op_type == "Unsqueeze"
+            next_node = om.get_next_nodes(next_node)[0]
+
+        assert next_node.op_type == "Concat"
+        next_node.set_inputs([sin_node.outputs[0], cos_node.outputs[0]])
+        next_node.set_attribute("axis", 4)
+        next_node = om.get_next_nodes(next_node)[0]
+        assert next_node.op_type == "Reshape"
+        next_node.set_input(1, reshape_init.name)
+
         matmul_node = om.get_node(matmul_name)
+        matmul_node.set_input(0, next_node.outputs[0])
+        if i == 0:
+            mm_b_value = om.get_initializer_value(matmul_node.inputs[1])
+            mm_b_value = np.concatenate([mm_b_value[128:256, ...], 
+                                         mm_b_value[0:128, ...], 
+                                         mm_b_value[256:, ...]], 
+                                        axis=0)
+            om.set_initializer_value(matmul_node.inputs[1], mm_b_value)
         
-        # 【安全校验】：如果找不到这一对节点，说明不需要/无法优化这个 block，直接跳过
-        if gather_node is None or matmul_node is None:
-            continue
-            
-        try:
-            next_node = om.get_next_nodes(gather_node)[0]
-            if next_node.op_type != "Mul": continue
-            mul_init_value = om.get_initializer_value(next_node.inputs[1])
-            if mul_init_value.size != 1: continue
-            
-            next_node = om.get_next_nodes(next_node)[0]
-            if next_node.op_type != "Unsqueeze": continue
-            next_node.set_inputs([gather_node.inputs[0], unsqueeze_axes_init1.name])
-            
-            next_node = om.get_next_nodes(next_node)[0]
-            if next_node.op_type != "Div": continue
-            div_init_value = om.get_initializer_value(next_node.inputs[1])
-            new_value = (div_init_value / mul_init_value).reshape(1, 1, 1, 64, 2)
-            new_init = om.create_initializer(next_node.name + "_B", new_value)
-            next_node.set_input(1, new_init.name)
-
-            next_nodes = om.get_next_nodes(next_node)
-            if len(next_nodes) != 2 or not all(x.op_type == 'Slice' for x in next_nodes): continue
-            
-            sin_node, cos_node = None, None
-            for j, slice_node in enumerate(next_nodes):
-                slice_node.set_inputs([slice_node.inputs[0], 
-                                       slice_starts_init1.name if j == 0 else slice_starts_init2.name,
-                                       slice_ends_init1.name if j == 0 else slice_ends_init2.name,
-                                       slice_axes_init.name,
-                                       slice_steps_init.name])
-                n_node = om.get_next_nodes(slice_node)[0]
-                if n_node.op_type == "Sin":
-                    sin_node = n_node
-                elif n_node.op_type == "Cos":
-                    cos_node = n_node
-                else:
-                    raise RuntimeError("match fail!")
-                n_node = om.get_next_nodes(n_node)[0]
-                n_node = om.get_next_nodes(n_node)[0]
-
-            next_node = n_node # Concat node
-            if next_node.op_type != "Concat": continue
-            next_node.set_inputs([sin_node.outputs[0], cos_node.outputs[0]])
-            next_node.set_attribute("axis", 4)
-            
-            next_node = om.get_next_nodes(next_node)[0]
-            if next_node.op_type != "Reshape": continue
-            next_node.set_input(1, reshape_init.name)
-
-            matmul_node.set_input(0, next_node.outputs[0])
-            if i == 0:
-                mm_b_value = om.get_initializer_value(matmul_node.inputs[1])
-                mm_b_value = np.concatenate([mm_b_value[128:256, ...], 
-                                             mm_b_value[0:128, ...], 
-                                             mm_b_value[256:, ...]], 
-                                            axis=0)
-                om.set_initializer_value(matmul_node.inputs[1], mm_b_value)
-        except Exception as e:
-            # 如果匹配过程中发生任何形状或节点断层的意外，静默跳过这个 block
-            continue
-            
     om.update_map()
-    try:
-        om.infer_shape(strict_mode=False)
-    except:
-        pass
+    om.infer_shape()
 
 
 def fuse_one_attention(om: ONNXModifier, softmax_name: str, new_mask: bool = None, num_heads: int = 12):
@@ -523,7 +428,7 @@ def optimize_normal_attention(om: ONNXModifier):
         # fuse_one_attention(om, f"/transformer/encoder/text_layers.{i}/self_attn/Softmax", "text_token_mask", num_heads=4)
         # /transformer/decoder
         fuse_one_attention(om, f"/transformer/decoder/layers.{i}/self_attn/Softmax", new_mask, num_heads=8)
-        fuse_one_attention(om, f"/transformer/decoder/layers.{i}/ca_text/Softmax", new_mask, num_heads=8)
+        # fuse_one_attention(om, f"/transformer/decoder/layers.{i}/ca_text/Softmax", new_mask, num_heads=8)
 
     om.update_map()
 
@@ -616,22 +521,59 @@ def optimize_backbone_attention(om: ONNXModifier):
             _fuse_one_attention(f"/backbone/backbone.0/layers.{l}/blocks.{b}/attn/softmax/Softmax")
 
 
+def optimize_ms_deform_attn(om: ONNXModifier):
+    def fuse_ms_deform_attn(value, spatial_shapes, level_start_index, sampling_locations, 
+                            attention_weights, output):
+        value_next_node = om.get_to_nodes(value)[0]
+        index = value_next_node.index
+        name_prefix = '/'.join(value.split('/')[:-1])
+        node_name = f"{name_prefix}/MSDeformAttn"
+        fusion_node = om.create_node("MSDeformAttn", 
+                                     node_name, 
+                                     [value, spatial_shapes, level_start_index, 
+                                      sampling_locations, attention_weights], 
+                                     [f"{node_name}_output_0"], 
+                                     index=index)
+        next_nodes = om.get_to_nodes(output)
+        for node in next_nodes:
+            node.replace_input(output, fusion_node.outputs[0])
+
+    spatial_shapes_int = om.create_initializer(
+        "/transformer/spatial_shapes",
+        np.array([(100, 150), (50, 75), (25, 38), (13, 19)], dtype=np.int64)
+    )
+    level_start_index_init = om.create_initializer(
+        "/transformer/level_start_index",
+        np.array([0, 15000, 18750, 19700], dtype=np.int64)
+    )
+
+    for i in range(6):
+        fuse_ms_deform_attn(
+            f"/transformer/encoder/layers.{i}/self_attn/Reshape_output_0",
+            spatial_shapes_int.name,
+            level_start_index_init.name,
+            f"/transformer/encoder/layers.{i}/self_attn/Add_output_0",
+            f"/transformer/encoder/layers.{i}/self_attn/Reshape_3_output_0",
+            f"/transformer/encoder/layers.{i}/self_attn/Transpose_9_output_0"
+        )
+        fuse_ms_deform_attn(
+            f"/transformer/decoder/layers.{i}/cross_attn/Reshape_output_0",
+            spatial_shapes_int.name,
+            level_start_index_init.name,
+            f"/transformer/decoder/layers.{i}/cross_attn/Add_output_0",
+            f"/transformer/decoder/layers.{i}/cross_attn/Reshape_3_output_0",
+            f"/transformer/decoder/layers.{i}/cross_attn/Transpose_9_output_0"
+        )
+
+    om.update_map()
+
+
 def optimize_bidirect_attention(om: ONNXModifier):
     for i in range(6):
         reduce_max_name = f"/transformer/encoder/fusion_layers.{i}/attn/ReduceMax_1"
         reduce_max_node = om.get_node(reduce_max_name)
-        
-        # 【安全校验】
-        if reduce_max_node is None:
-            continue
-            
-        next_nodes = om.get_next_nodes(reduce_max_node)
-        if not next_nodes:
-            continue
-            
-        next_node = next_nodes[0]
-        if next_node.op_type != "Sub":
-            continue
+        next_node = om.get_next_nodes(reduce_max_node)[0]
+        assert next_node.op_type == "Sub"
 
         name_prefix = '/'.join(reduce_max_name.split('/')[:-1])
         matmul_name = f"{name_prefix}/identity_MatMul"
@@ -646,48 +588,44 @@ def optimize_bidirect_attention(om: ONNXModifier):
         )
         next_node.set_input(1, matmul_node.outputs[0])
 
-# def main():
-#     input_onnx_path = sys.argv[1]
-#     output_onnx_path = sys.argv[2]
-#     # input_onnx_path = "ground_sim.onnx"
-#     # output_onnx_path = "ground_sim_0424_2nd.onnx"
 
-#     om = ONNXModifier(input_onnx_path)
-#     optimize_where_ndoes(om)         # 1. 替换where节点
-#     optimize_transpose_nodes(om)     # 2. 优化transpose节点
-#     optmize_sin_cos_block(om)        # 3. 优化位置编码
-#     # om.add_opset_import("com.microsoft", 1)
-#     # optimize_normal_attention(om)    # 4. 融合bert、transformer中的mha
-#     # optimize_ms_deform_attn(om)      # 5. 融合多尺度可变形注意力
-#     # optimize_backbone_attention(om)  # 6. 融合backbone中的注意力
-#     optimize_bidirect_attention(om)  # 7. 优化双向注意力
-#     om.save(output_onnx_path, save_as_external_data=False)
+def optimize_clip_ndoes(om: ONNXModifier):
+    """优化串联的两个clip: clip(min)->clip(max)"""
+    pass
+
+
+def optimize_gemm_nodes(om: ONNXModifier):
+    """
+     input_data
+      /  |  \
+    mm1 mm2 mm3
+    """
+    def find_parallel_gemm_nodes():
+        pass
+    
+    def merge_parallel_gemm_nodes(gemm_nodes):
+        pass
+    
+    pass
+
 
 def main():
-    # 假设你的原始模型路径
-    input_onnx_path = "../weights/ground_deform_sim.onnx"
-    # 优化后的模型输出路径
-    output_onnx_path = "../weights_opt/ground_deform_opt.onnx"
+    input_onnx_path = sys.argv[1]
+    output_onnx_path = sys.argv[2]
+    # input_onnx_path = "ground_sim.onnx"
+    # output_onnx_path = "ground_sim_0430.onnx"
 
-    print(f"Loading ONNX model from {input_onnx_path}...")
     om = ONNXModifier(input_onnx_path)
-    
-    print("1. Optimizing Where nodes (Crucial for FP16 & MIGraphX)...")
-    optimize_where_ndoes(om)         
-    
-    print("2. Optimizing Transpose nodes...")
-    optimize_transpose_nodes(om)     
-    
-    # print("3. Optimizing Sin/Cos positional encoding...")
-    # optmize_sin_cos_block(om)        
-    
-    # print("4. Optimizing Bidirectional attention...")
-    # optimize_bidirect_attention(om)  
-
-
-    print(f"Saving optimized model to {output_onnx_path}...")
+    optimize_where_ndoes(om)       # 1. 替换where节点
+    optimize_transpose_nodes(om)   # 2. 优化transpose节点
+    optmize_sin_cos_block(om)      # 3. 优化位置编码
+    om.add_opset_import("com.microsoft", 1)
+    optimize_normal_attention(om)  # 4. 融合bert、transformer中的mha
+    # optimize_backbone_attention(om)  # 5. 融合backbone中的注意力
+    optimize_ms_deform_attn(om)  # 6. 融合多尺度可变形注意力
+    optimize_bidirect_attention(om)    # 7. 优化双向注意力
     om.save(output_onnx_path, save_as_external_data=False)
-    print("Optimization Done!")
+
 
 if __name__ == "__main__":
     main()

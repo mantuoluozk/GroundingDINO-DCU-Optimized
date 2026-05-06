@@ -216,6 +216,16 @@ bash migraphx_export.bash
 bash migraphx_perf.bash
 ```
 
+4. 使用python脚本测试
+```bash
+python migraphx_infer.py  
+# offload=False推理，提前开辟gpu空间，数据放在device推理
+
+python migraphx_infer1.py 
+# offload=True推理，会慢一些
+```
+
+
 -----
 ## 8\. 测试结果对比
 
@@ -252,7 +262,8 @@ bash migraphx_perf.bash
 | **ORT + Plugin** | +自定义算子<br>+FP16 纯量化方案 B | `ground_deform_fp16_all.onnx` | `ort_plugin_fp16_B` | 105.35 | 9.49 |
 | **ORT + Plugin** | +自定义算子<br>+FP16 极致优化方案 C | `ground_deform_fp16_all.onnx` | `ort_plugin_fp16_C` | 100.91 | 9.90 |
 
-### 8.3 migraphx BW100 测试结果
+### 8.3 migraphx BW150和BW100 测试结果
+BW100示例结果：
 ```
 Batch size: 1
 Rate: 6.05197 inferences/sec
@@ -263,6 +274,15 @@ Total instructions time: 205.275ms
 Overhead time: 2.32812ms, -40.0399ms
 Overhead: 1%, -24%
 ```
+汇总结果
+| 设备 | 推理方式 | FPS | 平均推理时间 (ms) |
+| :--- | :--- | :--- | :--- |
+| BW150 | migraphx-driver | 14.93 | 66.97 |
+| BW150 | Python + MIGraphX（device） | 13.65 | 73.20（包含前后处理） |
+| BW100 | migraphx-driver | 13.54 | 73.87 |
+| BW100 | Python + MIGraphX（device） | 12.12 | 82.44（包含前后处理） |
+
+
 -----
 
 ## 参考项目
