@@ -21,7 +21,9 @@ docker pull image.sourcefind.cn:5000/dcu/admin/base/pytorch:2.5.1-ubuntu22.04-dt
 在进行编译和运行前，请先激活相关的计算栈环境并配置 HuggingFace 镜像：
 
 ```bash
-source /opt/dtk/cuda/env.sh
+source /opt/dtk/cuda/cuda-12/env.sh
+cp -r /opt/dtk/cuda/cuda-12/include /opt/dtk/cuda/cuda-12/include-bak
+rm -rf /opt/dtk/cuda/cuda-12/include
 export HF_ENDPOINT=https://hf-mirror.com
 ```
 
@@ -206,7 +208,7 @@ cd migraphx_infer
 ```
 
 2. 运行转换onnx脚本
-将简化后的onnx转换为要用migraphx推理的onnx
+将简化后的onnx转换为要用migraphx推理的onnx(ground_sim.onnx->ground_opt.onnx)
 ```bash
 bash migraphx_export.bash
 ```

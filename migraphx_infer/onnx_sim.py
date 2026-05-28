@@ -2,8 +2,8 @@ import onnx
 from onnxsim import simplify
 from onnxconverter_common import float16
 
-onnx_model_path = "./weights/ground.onnx"
-sim_model_path = "./weights/ground_sim.onnx"
+onnx_model_path = "../weights/ground.onnx"
+sim_model_path = "../weights/ground_sim.onnx"
 
 print("1️⃣ 正在进行 ONNX Simplify...")
 model = onnx.load(onnx_model_path)

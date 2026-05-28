@@ -276,7 +276,7 @@ def benchmark_performance(
 if __name__ == "__main__":
 
     model_path = "../weights/ground_opt_0430.onnx"
-    cache_path = "../weights/ground_opt_0430.mxr"
+    cache_path = "../weights/ground_opt_0515_1.mxr"
     img_path = "../images/in/car_1.jpg"
 
     BOX_TRESHOLD = 0.35
@@ -288,7 +288,7 @@ if __name__ == "__main__":
     model = MIGraphXModel(
         model_path,
         cache_path=cache_path,
-        device_id=5,
+        device_id=2,
         force_recompile=False 
     )
 

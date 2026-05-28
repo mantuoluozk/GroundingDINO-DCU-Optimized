@@ -407,7 +407,8 @@ def optimize_normal_attention(om: ONNXModifier):
                                    "Cast_for_attention_mask",
                                    ["attention_mask"],
                                    ["Cast_for_attention_mask_output_0"],
-                                   to=1,
+                                   # to=1,  # float32
+                                   to=6,  # int32
                                    index=mask_next_node.index)
         reducesum_node = om.create_node("ReduceSum", 
                                         "ReduceSum_for_mask", 
@@ -428,7 +429,7 @@ def optimize_normal_attention(om: ONNXModifier):
         # fuse_one_attention(om, f"/transformer/encoder/text_layers.{i}/self_attn/Softmax", "text_token_mask", num_heads=4)
         # /transformer/decoder
         fuse_one_attention(om, f"/transformer/decoder/layers.{i}/self_attn/Softmax", new_mask, num_heads=8)
-        # fuse_one_attention(om, f"/transformer/decoder/layers.{i}/ca_text/Softmax", new_mask, num_heads=8)
+        fuse_one_attention(om, f"/transformer/decoder/layers.{i}/ca_text/Softmax", new_mask, num_heads=8)
 
     om.update_map()
 
@@ -613,17 +614,17 @@ def main():
     input_onnx_path = sys.argv[1]
     output_onnx_path = sys.argv[2]
     # input_onnx_path = "ground_sim.onnx"
-    # output_onnx_path = "ground_sim_0430.onnx"
+    # output_onnx_path = "ground_sim_0520_new.onnx"
 
     om = ONNXModifier(input_onnx_path)
-    optimize_where_ndoes(om)       # 1. 替换where节点
-    optimize_transpose_nodes(om)   # 2. 优化transpose节点
-    optmize_sin_cos_block(om)      # 3. 优化位置编码
+    optimize_where_ndoes(om)         # 1. 替换where节点
+    optimize_transpose_nodes(om)     # 2. 优化transpose节点
+    optmize_sin_cos_block(om)        # 3. 优化位置编码
     om.add_opset_import("com.microsoft", 1)
-    optimize_normal_attention(om)  # 4. 融合bert、transformer中的mha
+    optimize_normal_attention(om)    # 4. 融合bert、transformer中的mha
     # optimize_backbone_attention(om)  # 5. 融合backbone中的注意力
-    optimize_ms_deform_attn(om)  # 6. 融合多尺度可变形注意力
-    optimize_bidirect_attention(om)    # 7. 优化双向注意力
+    optimize_ms_deform_attn(om)      # 6. 融合多尺度可变形注意力
+    optimize_bidirect_attention(om)  # 7. 优化双向注意力
     om.save(output_onnx_path, save_as_external_data=False)
 
 
