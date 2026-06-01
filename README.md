@@ -202,18 +202,67 @@ python onnx_inference_deform_optim.py
 
 ## 7\. migraphx推理
 
-1. 进入migraphx_infer文件夹
+1. 环境准备(http://42.228.13.241:10068/wangwf/groundingdino)
+
+* 下载 DTK-26.04-txpl-temp-0312-ubuntu20.04-x86_64(http://112.11.77.146:65182/jenkins/rocm/26.04/intel/ubuntu20.04/DTK-26.04-txpl-temp-0312-ubuntu20.04-x86_64.tar.gz) ，解压后替换掉原 /opt/dtk 目录。
 ```bash
-cd migraphx_infer
+tar -zxvf DTK-26.04-txpl-temp-0312-ubuntu20.04-x86_64.tar.gz -C /opt/
+rm /opt/dtk # 删除原来的软链接
+ln -s /opt/dtk-26.04-txpl-temp-0312 /opt/dtk # 创建新的软链接
 ```
 
-2. 运行转换onnx脚本
-将简化后的onnx转换为要用migraphx推理的onnx(ground_sim.onnx->ground_opt.onnx)
+* 替换hipdnn：
 ```bash
+tar -zxvf package_resize.tar.gz
+cd package_resize
+cp -r install/lib/hipdnn_plugins /opt/dtk/lib/
+cp -r install/lib/libhipdnn_backend.so /opt/dtk/lib/
+rm -rf /opt/dtk/include/hipdnn
+cp -r install/include/hipdnn /opt/dtk/include/hipdnn
+rm -rf /opt/dtk/lib/cmake/hipdnn*
+cp -r install/lib/cmake/* /opt/dtk/lib/cmake/
+rm -f /opt/dtk/lib/hipdnn_plugins/engines/libmiopen_legacy_plugin.so
+```
+
+* 激活dtk
+```bash
+source /opt/dtk/env.sh
+export LD_LIBRARY_PATH=/usr/local/lib/python3.10/dist-packages/torch/lib:${LD_LIBRARY_PATH}
+```
+
+
+* 安装migraphx
+```bash
+chmod +x ./migraphx-5.1.2+das.opt1.ab9210b.dtk2604-cp310-cp310-manylinux_2_35_x86_64.run
+./migraphx-5.1.2+das.opt1.ab9210b.dtk2604-cp310-cp310-manylinux_2_35_x86_64.run
+```
+
+
+* 模型优化
+
+```bash
+cd weights
+onnxsim ground.onnx ground_sim.onnx
+cd migraphx_infer
+python modify_onnx_0601.py ../weights/ground_sim.onnx ../weights/ground_opt.onnx
+```
+
+
+
+2. 性能测试(编译加运行)
+```bash
+export MIGRAPHX_ENABLE_GRAPHAPI_REDUCTION=1
+export MIGRAPHX_ENABLE_LAYERNORM_FUSION=1
+migraphx-driver perf --onnx ground_opt.onnx --fp16 --output ground_opt.mxr
+```
+
+或者进入migraphx_infer文件夹，运行
+```bash
+cd migraphx_infer
 bash migraphx_export.bash
 ```
 
-3. 如果已经得到了mxr文件，直接测试
+3. 如果已经得到了mxr文件，也可以直接测试
 ```bash
 bash migraphx_perf.bash
 ```

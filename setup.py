@@ -38,7 +38,8 @@ install_torch()
 
 import torch
 from setuptools import find_packages, setup
-from torch.utils.cpp_extension import CUDA_HOME, CppExtension, CUDAExtension
+# from torch.utils.cpp_extension import CUDA_HOME, CppExtension, CUDAExtension
+from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME, CppExtension, CUDAExtension
 
 # groundingdino version info
 version = "0.1.0"
@@ -82,7 +83,26 @@ def get_extensions():
     extra_compile_args = {"cxx": []}
     define_macros = []
 
-    if CUDA_HOME is not None and (torch.cuda.is_available() or "TORCH_CUDA_ARCH_LIST" in os.environ):
+    # if CUDA_HOME is not None and (torch.cuda.is_available() or "TORCH_CUDA_ARCH_LIST" in os.environ):
+    
+    cuda_home = CUDA_HOME or os.environ.get("CUDA_HOME") or ROCM_HOME or os.environ.get("ROCM_HOME") or os.environ.get("HIP_HOME")
+
+    print("DEBUG imported CUDA_HOME:", CUDA_HOME)
+    print("DEBUG imported ROCM_HOME:", ROCM_HOME)
+    print("DEBUG env CUDA_HOME:", os.environ.get("CUDA_HOME"))
+    print("DEBUG env ROCM_HOME:", os.environ.get("ROCM_HOME"))
+    print("DEBUG env HIP_HOME:", os.environ.get("HIP_HOME"))
+    print("DEBUG cuda_home used:", cuda_home)
+    print("DEBUG torch.cuda.is_available:", torch.cuda.is_available())
+    print("DEBUG TORCH_CUDA_ARCH_LIST:", os.environ.get("TORCH_CUDA_ARCH_LIST"))
+    print("DEBUG FORCE_CUDA:", os.environ.get("FORCE_CUDA"))
+
+    if cuda_home is not None and (
+        torch.cuda.is_available()
+        or "TORCH_CUDA_ARCH_LIST" in os.environ
+        or os.getenv("FORCE_CUDA", "0") == "1"
+    ):
+        
         print("Compiling with CUDA")
         extension = CUDAExtension
         sources += source_cuda

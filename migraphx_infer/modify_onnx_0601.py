@@ -188,7 +188,9 @@ def optimize_transpose_nodes(om: ONNXModifier):
     om.get_node("/transformer/enc_out_class_embed/Transpose").set_attribute("perm", [0, 2, 1])
 
     # modify /transformer/decoder/Reshape_*
-    om.set_initializer_value("_v_5525", np.array([1, 900, -1], np.int64))
+    dst_shape_name = om.get_node("/transformer/decoder/Reshape").inputs[1]
+    # om.set_initializer_value("_v_5525", np.array([1, 900, -1], np.int64))
+    om.set_initializer_value(dst_shape_name, np.array([1, 900, -1], np.int64))
 
     # modify /transformer/decoder/layers.*/self_attn/Reshape_4
     # modify /transformer/decoder/layers.*/ca_text/Reshape_6
@@ -313,7 +315,8 @@ def optmize_sin_cos_block(om: ONNXModifier):
     om.infer_shape()
 
 
-def fuse_one_attention(om: ONNXModifier, softmax_name: str, new_mask: bool = None, num_heads: int = 12):
+def fuse_one_attention(om: ONNXModifier, softmax_name: str, padding_mask: bool = None, 
+                       attn_mask: bool = None, num_heads: int = 12, block_type: str = "bert"):
     softmax_node = om.get_node(softmax_name)
     tmp_node = om.get_prev_nodes(softmax_node)[0]
     assert tmp_node.op_type in ["MatMul", "Add"]
@@ -326,17 +329,34 @@ def fuse_one_attention(om: ONNXModifier, softmax_name: str, new_mask: bool = Non
             tmp_node = om.get_from_node(tmp_node.inputs[0])
         assert tmp_node.op_type == "MatMul"
         mask = mask_node.inputs[1]
-        assert new_mask is not None
+        if padding_mask is not None and attn_mask is not None:
+            raise ValueError("padding_mask and attn_mask cannot be provided at the same time")
+        if padding_mask is None and attn_mask is None:
+            raise ValueError("padding_mask or attn_mask must be provided")
 
     tmp_node1 = om.get_from_node(tmp_node.inputs[0])
     if tmp_node1.op_type == "Mul":
         tmp_node1 = om.get_prev_nodes(tmp_node1)[0]
     tmp_node2 = om.get_from_node(tmp_node.inputs[1])
+    if tmp_node2.op_type == "Mul":
+        tmp_node2 = om.get_prev_nodes(tmp_node2)[0]
     assert tmp_node1.op_type == tmp_node2.op_type == "Transpose"
     tmp_node1 = om.get_prev_nodes(tmp_node1)[0]
     tmp_node2 = om.get_prev_nodes(tmp_node2)[0]
     assert tmp_node1.op_type == tmp_node2.op_type == "Reshape"
-    q, k = tmp_node1.inputs[0], tmp_node2.inputs[0]
+
+    if attn_mask is not None:
+        q, k = tmp_node1.outputs[0], tmp_node2.outputs[0]
+        q_dst_shape_value = om.get_initializer_value(tmp_node1.inputs[1])
+        if q_dst_shape_value.size == 3:
+            q_dst_shape_value_new = np.array([1, *q_dst_shape_value.tolist()], np.int64)
+            om.set_initializer_value(tmp_node1.inputs[1], q_dst_shape_value_new)
+        k_dst_shape_value = om.get_initializer_value(tmp_node2.inputs[1])
+        if k_dst_shape_value.size == 3:
+            k_dst_shape_value_new = np.array([1, *k_dst_shape_value.tolist()], np.int64)
+            om.set_initializer_value(tmp_node2.inputs[1], k_dst_shape_value_new)
+    else:
+        q, k = tmp_node1.inputs[0], tmp_node2.inputs[0]
 
     tmp_node = om.get_next_nodes(softmax_node)[0]
     assert tmp_node.op_type == "MatMul"
@@ -345,7 +365,14 @@ def fuse_one_attention(om: ONNXModifier, softmax_name: str, new_mask: bool = Non
         assert tmp_node3.op_type == "Transpose"
         tmp_node3 = om.get_prev_nodes(tmp_node3)[0]
         assert tmp_node3.op_type == "Reshape"
-        v = tmp_node3.inputs[0]
+        if attn_mask is not None:
+            v = tmp_node3.outputs[0]
+            v_dst_shape_value = om.get_initializer_value(tmp_node3.inputs[1])
+            if v_dst_shape_value.size == 3:
+                v_dst_shape_value_new = np.array([1, *v_dst_shape_value.tolist()], np.int64)
+                om.set_initializer_value(tmp_node3.inputs[1], v_dst_shape_value_new)
+        else:
+            v = tmp_node3.inputs[0]
     else:
         v_init = om.get_initializer(tmp_node.inputs[1])
         v_init_value = om.get_initializer_value(tmp_node.inputs[1])
@@ -359,55 +386,81 @@ def fuse_one_attention(om: ONNXModifier, softmax_name: str, new_mask: bool = Non
     assert tmp_node.op_type == "Transpose"
     tmp_node = om.get_next_nodes(tmp_node)[0]
     assert tmp_node.op_type == "Reshape"
-    mha_next_node = om.get_next_nodes(tmp_node)[0]
-    if mha_next_node.op_type == "Gemm":
-        gemm_next_node = om.get_next_nodes(mha_next_node)[0]
+    # if softmax_name == "/transformer/encoder/text_layers.0/self_attn/Softmax":
+    #     breakpoint()
+    if attn_mask is not None:
+        mha_next_node = tmp_node
+        mha_out_shape_value = om.get_initializer_value(tmp_node.inputs[1])
+        if mha_out_shape_value.size == 2:
+            mha_out_shape_value_new = np.array([1, -1, mha_out_shape_value[-1].item()], np.int64)
+            om.set_initializer_value(tmp_node.inputs[1], mha_out_shape_value_new)
+    else:
+        mha_next_node = om.get_next_nodes(tmp_node)[0]
+        assert mha_next_node.op_type in ["Gemm", "MatMul"]
+
+    gemm_node = None
+    if om.get_next_nodes(tmp_node)[0].op_type == "Gemm":
+        gemm_node = om.get_next_nodes(tmp_node)[0]
+        gemm_next_node = om.get_next_nodes(gemm_node)[0]
         assert gemm_next_node.op_type == "Reshape"
         reshape_next_node = om.get_next_nodes(gemm_next_node)[0]
         assert reshape_next_node.op_type == "Add"
-    else:
-        assert mha_next_node.op_type == "MatMul"
+
 
     name_prefix = '/'.join(softmax_name.split('/')[:-1])
-    mha_name = f"{name_prefix}/MultiHeadAttention"
-    mha_node = om.create_node("MultiHeadAttention",
-                                mha_name,
-                                [q, k, v] if mask is None else [q, k, v, new_mask],
-                                [mha_name+'_output_0'],
-                                num_heads=num_heads,
-                                domain="com.microsoft",
-                                index=mha_next_node.index-1)
+    node_inputs = [q, k, v]
+    if mask is None:
+        mha_type = "MultiHeadAttention"
+    else:
+        if padding_mask is not None:
+            mha_type = "MultiHeadAttention"
+            node_inputs.append(padding_mask)
+        elif attn_mask is not None:
+            mha_type = "MultiHeadAttentionWithAttnMask"
+            node_inputs.append(attn_mask)
+        else:
+            raise ValueError("padding_mask or attn_mask must be provided")
+    mha_name = f"{name_prefix}/{mha_type}"
+    mha_node = om.create_node(mha_type,
+                              mha_name,
+                              node_inputs,
+                              [mha_name+'_output_0'],
+                              num_heads=num_heads,
+                              domain="com.microsoft",
+                              index=mha_next_node.index-1)
     mha_next_node.replace_input(mha_next_node.inputs[0], mha_node.outputs[0])
 
-    if mha_next_node.op_type == "Gemm":
-        weights = om.get_initializer_value(mha_next_node.inputs[1])
-        transB = mha_next_node.attrs["transB"]
+    if gemm_node is not None:
+        weights = om.get_initializer_value(gemm_node.inputs[1])
+        transB = gemm_node.attrs["transB"]
         assert transB == 1
         weights = np.ascontiguousarray(weights.transpose(1, 0))
-        om.set_initializer_value(mha_next_node.inputs[1], weights)
-        new_matmul_name = mha_next_node.name.replace("Gemm", "MatMul(Gemm)")
+        om.set_initializer_value(gemm_node.inputs[1], weights)
+        new_matmul_name = gemm_node.name.replace("Gemm", "MatMul(Gemm)")
         new_matmul_node = om.create_node("MatMul",
-                                            new_matmul_name,
-                                            [mha_node.outputs[0], mha_next_node.inputs[1]],
-                                            [new_matmul_name + "_output_0"],
-                                            index=mha_next_node.index)
-        new_bias_name = mha_next_node.name.replace("Gemm", "Add(Gemm)")
+                                        new_matmul_name,
+                                        [mha_next_node.outputs[0] if attn_mask is not None else mha_node.outputs[0], 
+                                         gemm_node.inputs[1]],
+                                        [new_matmul_name + "_output_0"],
+                                        index=gemm_node.index)
+        new_bias_name = gemm_node.name.replace("Gemm", "Add(Gemm)")
         new_add_node = om.create_node("Add",
-                                        new_bias_name,
-                                        [new_matmul_node.outputs[0], mha_next_node.inputs[2]],
-                                        [new_bias_name + "_output_0"],
-                                        index=new_matmul_node.index+1)
+                                    new_bias_name,
+                                    [new_matmul_node.outputs[0], gemm_node.inputs[2]],
+                                    [new_bias_name + "_output_0"],
+                                    index=new_matmul_node.index+1)
         reshape_next_node.replace_input(gemm_next_node.outputs[0], new_add_node.outputs[0])
 
 
 def optimize_normal_attention(om: ONNXModifier):
-    def create_new_attention_mask():
+    def _create_new_padding_mask():
         mask_next_node = om.get_to_nodes("attention_mask")[0]
         cast_node = om.create_node("Cast",
-                                   "Cast_for_attention_mask",
+                                   "Cast_for_padding_mask",
                                    ["attention_mask"],
-                                   ["Cast_for_attention_mask_output_0"],
-                                   to=1,
+                                   ["Cast_for_padding_mask_output_0"],
+                                   # to=1,  # float32
+                                   to=6,  # int32
                                    index=mask_next_node.index)
         reducesum_node = om.create_node("ReduceSum", 
                                         "ReduceSum_for_mask", 
@@ -418,17 +471,32 @@ def optimize_normal_attention(om: ONNXModifier):
                                         index=cast_node.index+1)
         return reducesum_node.outputs[0]
 
-    # bert
-    # for i in range(12):
-    #     fuse_one_attention(om, f"/bert/encoder/layer.{i}/attention/self/Softmax", "text_token_mask", num_heads=12)
+    def _create_new_attn_mask(_num_heads: int):
+        cast_node = om.get_node("/bert/Cast")
+        tile_node = om.create_node("Tile",
+                                   f"Tile_for_attn_mask_{_num_heads}heads",
+                                   ["/bert/Unsqueeze_output_0", 
+                                    om.create_initializer(f"{_num_heads}heads_repeats", 
+                                                          np.array([1, _num_heads, 1, 1], np.int64)).name],
+                                   [f"Tile_for_attn_mask_{_num_heads}heads_output_0"],
+                                   index=cast_node.index)
+        return tile_node.outputs[0]
 
-    new_mask = create_new_attention_mask()
+    padding_mask = _create_new_padding_mask()
+    attn_mask1 = _create_new_attn_mask(12)
+    attn_mask2 = _create_new_attn_mask(4)
+
+    # bert
+    for i in range(12):
+        fuse_one_attention(om, f"/bert/encoder/layer.{i}/attention/self/Softmax", attn_mask=attn_mask1, num_heads=12)
+
+
     for i in range(6):
         # /transformer/encoder
-        # fuse_one_attention(om, f"/transformer/encoder/text_layers.{i}/self_attn/Softmax", "text_token_mask", num_heads=4)
+        fuse_one_attention(om, f"/transformer/encoder/text_layers.{i}/self_attn/Softmax", attn_mask=attn_mask2, num_heads=4)
         # /transformer/decoder
-        fuse_one_attention(om, f"/transformer/decoder/layers.{i}/self_attn/Softmax", new_mask, num_heads=8)
-        fuse_one_attention(om, f"/transformer/decoder/layers.{i}/ca_text/Softmax", new_mask, num_heads=8)
+        fuse_one_attention(om, f"/transformer/decoder/layers.{i}/self_attn/Softmax", padding_mask=padding_mask, num_heads=8)
+        fuse_one_attention(om, f"/transformer/decoder/layers.{i}/ca_text/Softmax", padding_mask=padding_mask, num_heads=8)
 
     om.update_map()
 
@@ -436,25 +504,32 @@ def optimize_normal_attention(om: ONNXModifier):
 def optimize_backbone_attention(om: ONNXModifier):
     def get_original_mask(mask_name, name_prefix):
         mask_value = om.get_initializer_value(mask_name)
-        orig_mask = np.where(mask_value==0, 1, 0).astype(np.bool_)
-        orig_mask_init = om.create_initializer(f"{name_prefix}/mask", orig_mask)
-        return orig_mask_init.name
+        # mask_value = mask_value.astype(np.int64)
+        assert mask_value.ndim == 5 and mask_value.shape[2] == 1
+        mask_value = mask_value.reshape(mask_value.shape[0] * mask_value.shape[1], mask_value.shape[3], mask_value.shape[4])
+        #  = np.where(mask_value==0, 1, 0).astype(np.bool_)
 
-    def _fuse_one_attention(softmax_name: str):
-        name_prefix = '/'.join(softmax_name.split('/')[:-1])
+        new_mask_init = om.create_initializer(f"{name_prefix}/mask", mask_value)
+        return new_mask_init.name
+
+    def _fuse_one_attention_with_bias(softmax_name: str):
+        name_prefix = '/'.join(softmax_name.split('/')[:-2])
 
         softmax_node = om.get_node(softmax_name)
         tmp_node = om.get_prev_nodes(softmax_node)[0]
-        pos_bias_init = None
+        mask = None
         if tmp_node.op_type == "Reshape":
             tmp_node = om.get_prev_nodes(tmp_node)[0]
             assert tmp_node.op_type == "Add"
-            pos_bias_init = om.get_initializer(tmp_node.inputs[1])
+            mask = get_original_mask(tmp_node.inputs[1], name_prefix)
             tmp_node = om.get_prev_nodes(tmp_node)[0]
             assert tmp_node.op_type == "Reshape"
             tmp_node = om.get_prev_nodes(tmp_node)[0]
         assert tmp_node.op_type == "Add"
-        mask = get_original_mask(tmp_node.inputs[1], name_prefix)
+        pos_bias_init_value = om.get_initializer_value(tmp_node.inputs[1])
+        assert pos_bias_init_value.shape[0] == 1
+        om.set_initializer_value(tmp_node.inputs[1], pos_bias_init_value.squeeze(axis=0))
+        pos_bias_init = tmp_node.inputs[1]
 
         tmp_node = om.get_prev_nodes(tmp_node)[0]
         assert tmp_node.op_type == "MatMul"
@@ -485,26 +560,27 @@ def optimize_backbone_attention(om: ONNXModifier):
         assert tmp_node.op_type == "Transpose"
         tmp_node = om.get_next_nodes(tmp_node)[0]
         assert tmp_node.op_type == "Reshape"
-        mha_out = tmp_node.outputs[0]
+        # mha_out = tmp_node.outputs[0]
+        mha_out = tmp_node.inputs[0]
 
         old_dst_shape = om.get_initializer_value(reshape_node.inputs[1])
         b, s, _, h, d = old_dst_shape
-        new_dst_shape = [b, s, _, h*d]
-        new_dst_shape_init = om.create_initializer(f"{name_prefix}/qkv_hidden_states_shape", 
-                                                   np.array(new_dst_shape, np.int64))
-        reshape_node.set_input(1, new_dst_shape_init.name)
+        # new_dst_shape = [b, s, _, h*d]
+        # new_dst_shape_init = om.create_initializer(f"{name_prefix}/qkv_hidden_states_shape", 
+        #                                            np.array(new_dst_shape, np.int64))
+        # reshape_node.set_input(1, new_dst_shape_init.name)
         for node in [q_gather_node, k_gather_node, v_gather_node]:
             node.set_input(0, reshape_node.outputs[0])
             node.set_attribute("axis", 2)
 
-        mha_name = f"{name_prefix}/MultiHeadAttention"
+        mha_name = f"{name_prefix}/MultiHeadAttentionWithAttnMask"
         inputs = [q_gather_node.outputs[0], 
                   k_gather_node.outputs[0], 
                   v_gather_node.outputs[0],
-                  mask]
-        if pos_bias_init is not None:
-            inputs.append(pos_bias_init.name)
-        mha_node = om.create_node("MultiHeadAttention",
+                  pos_bias_init]
+        if mask is not None:
+            inputs.append(mask)
+        mha_node = om.create_node("MultiHeadAttentionWithAttnMask",
                                     mha_name,
                                     inputs,
                                     [mha_name+'_output_0'],
@@ -518,7 +594,7 @@ def optimize_backbone_attention(om: ONNXModifier):
     for l in range(num_layers):  
         num_blocks = 18 if l == 2 else 2
         for b in range(num_blocks):
-            _fuse_one_attention(f"/backbone/backbone.0/layers.{l}/blocks.{b}/attn/softmax/Softmax")
+            _fuse_one_attention_with_bias(f"/backbone/backbone.0/layers.{l}/blocks.{b}/attn/softmax/Softmax")
 
 
 def optimize_ms_deform_attn(om: ONNXModifier):
@@ -589,21 +665,41 @@ def optimize_bidirect_attention(om: ONNXModifier):
         next_node.set_input(1, matmul_node.outputs[0])
 
 
+def optimize_clip_ndoes(om: ONNXModifier):
+    """优化串联的两个clip: clip(min)->clip(max)"""
+    pass
+
+
+def optimize_gemm_nodes(om: ONNXModifier):
+    """
+     input_data
+      /  |  \
+    mm1 mm2 mm3
+    """
+    def find_parallel_gemm_nodes():
+        pass
+    
+    def merge_parallel_gemm_nodes(gemm_nodes):
+        pass
+    
+    pass
+
+
 def main():
     input_onnx_path = sys.argv[1]
     output_onnx_path = sys.argv[2]
     # input_onnx_path = "ground_sim.onnx"
-    # output_onnx_path = "ground_sim_0424_2nd.onnx"
+    # output_onnx_path = "ground_sim_0529.onnx"
 
     om = ONNXModifier(input_onnx_path)
     optimize_where_ndoes(om)         # 1. 替换where节点
     optimize_transpose_nodes(om)     # 2. 优化transpose节点
     optmize_sin_cos_block(om)        # 3. 优化位置编码
-    # om.add_opset_import("com.microsoft", 1)
-    # optimize_normal_attention(om)    # 4. 融合bert、transformer中的mha
-    # optimize_ms_deform_attn(om)      # 5. 融合多尺度可变形注意力
-    # optimize_backbone_attention(om)  # 6. 融合backbone中的注意力
-    optimize_bidirect_attention(om)  # 7. 优化双向注意力
+    om.add_opset_import("com.microsoft", 1)
+    optimize_normal_attention(om)    # 4. 融合bert、transformer中的mha
+    optimize_backbone_attention(om)  # 5. 融合backbone中的注意力
+    optimize_ms_deform_attn(om)      # 6. 融合多尺度可变形注意力
+    # optimize_bidirect_attention(om)  # 7. 优化双向注意力
     om.save(output_onnx_path, save_as_external_data=False)
 
 

@@ -17,7 +17,7 @@ from PIL import Image
 """
 
 so_options = ort.SessionOptions()
-custom_op_lib_path = "../ort_plugin_fp16_C/build/libms_deform_attn_ort.so" 
+custom_op_lib_path = "../ort_plugin/build/libms_deform_attn_ort.so" 
 so_options.register_custom_ops_library(custom_op_lib_path)
 # 开启ort优化
 so_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
@@ -195,7 +195,7 @@ def benchmark_performance(
 
 if __name__ == '__main__':
     # 配置参数
-    model_path = '../weights/ground_deform_fp16_all.onnx'
+    model_path = '../weights/ground_deform_sim_fp16.onnx'
     """
         ../weights/ground_deform.onnx 普通版本
         ../weights/ground_deform_sim.onnx 简化版本

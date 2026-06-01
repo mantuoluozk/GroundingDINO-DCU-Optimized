@@ -275,8 +275,8 @@ def benchmark_performance(
 # =========================
 if __name__ == "__main__":
 
-    model_path = "../weights/ground_opt_0430.onnx"
-    cache_path = "../weights/ground_opt_0515_1.mxr"
+    model_path = "../weights/ground_opt_0601.onnx"
+    cache_path = "../weights/ground_opt_0601.mxr"
     img_path = "../images/in/car_1.jpg"
 
     BOX_TRESHOLD = 0.35

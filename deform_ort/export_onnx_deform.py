@@ -45,12 +45,11 @@ text_token_mask = torch.tensor([[[True, False, False, False],
                                  [False,  True,  True,  False],
                                  [False,  False, False, True]]]).to(device)
 
-# img = torch.randn(1, 3, 800, 1200).to(device)
-img = torch.randn(1, 3, 400, 600).to(device)
+img = torch.randn(1, 3, 800, 1200).to(device)
+# img = torch.randn(1, 3, 400, 600).to(device)
 
 # 导出 ONNX
-# onnx_output_path = "../weights/ground_deform.onnx"
-onnx_output_path = "../weights_400x600/ground_deform.onnx"
+onnx_output_path = "../weights/ground_deform.onnx"
 
 torch.onnx.export(
     model,

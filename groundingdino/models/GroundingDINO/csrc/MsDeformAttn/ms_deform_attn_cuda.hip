@@ -82,25 +82,6 @@ at::Tensor ms_deform_attn_cuda_forward(
     return output;
 }
 
-// at::Tensor ms_deform_attn_forward_wrapper(
-//     const at::Tensor &value,
-//     const at::Tensor &spatial_shapes,
-//     const at::Tensor &level_start_index,
-//     const at::Tensor &sampling_loc,
-//     const at::Tensor &attn_weight,
-//     int64_t im2col_step  // ✅ 注意这里
-// )
-// {
-//     return groundingdino::ms_deform_attn_cuda_forward(
-//         value,
-//         spatial_shapes,
-//         level_start_index,
-//         sampling_loc,
-//         attn_weight,
-//         im2col_step
-//     );
-// }
-
 std::vector<at::Tensor> ms_deform_attn_cuda_backward(
     const at::Tensor &value, 
     const at::Tensor &spatial_shapes,
@@ -174,15 +155,3 @@ std::vector<at::Tensor> ms_deform_attn_cuda_backward(
 }
 
 } // namespace groundingdino
-
-// #include <torch/library.h>
-
-// // 注册 schema
-// TORCH_LIBRARY(my_ops, m) {
-//     m.def("ms_deform_attn(Tensor value, Tensor spatial_shapes, Tensor level_start_index, Tensor sampling_loc, Tensor attn_weight, int im2col_step) -> Tensor");
-// }
-
-// // CUDA实现
-// TORCH_LIBRARY_IMPL(my_ops, CUDA, m) {
-//     m.impl("ms_deform_attn", groundingdino::ms_deform_attn_forward_wrapper);
-// }
