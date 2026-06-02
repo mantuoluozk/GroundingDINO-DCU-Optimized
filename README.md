@@ -202,9 +202,9 @@ python onnx_inference_deform_optim.py
 
 ## 7\. migraphx推理
 
-1. 环境准备(http://42.228.13.241:10068/wangwf/groundingdino)
+1. [环境准备](http://42.228.13.241:10068/wangwf/groundingdino)
 
-* 下载 DTK-26.04-txpl-temp-0312-ubuntu20.04-x86_64(http://112.11.77.146:65182/jenkins/rocm/26.04/intel/ubuntu20.04/DTK-26.04-txpl-temp-0312-ubuntu20.04-x86_64.tar.gz) ，解压后替换掉原 /opt/dtk 目录。
+* 下载 [DTK-26.04-txpl-temp-0312-ubuntu20.04-x86_64](http://112.11.77.146:65182/jenkins/rocm/26.04/intel/ubuntu20.04/DTK-26.04-txpl-temp-0312-ubuntu20.04-x86_64.tar.gz) ，解压后替换掉原 /opt/dtk 目录。
 ```bash
 tar -zxvf DTK-26.04-txpl-temp-0312-ubuntu20.04-x86_64.tar.gz -C /opt/
 rm /opt/dtk # 删除原来的软链接
@@ -323,8 +323,8 @@ python migraphx_infer1.py
 
 
 汇总结果
-| 设备 | 推理方式 | FPS | |
-| :--- | :--- | :--- | :--- |
+| 设备 | 推理方式 | FPS | 
+| :--- | :--- | :--- | 
 | BW150 | migraphx-driver | 26.51 | 
 | BW150 | Python + MIGraphX（device） | 23.02 | 
 | BW100 | migraphx-driver | 22.93 | 
