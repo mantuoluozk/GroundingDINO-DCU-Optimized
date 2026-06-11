@@ -250,6 +250,11 @@ python modify_onnx_0601.py ../weights/ground_sim.onnx ../weights/ground_opt.onnx
 
 
 2. 性能测试(编译加运行)
+先加入环境变量
+```bash
+export LD_LIBRARY_PATH=/usr/local/lib/python3.10/dist-packages/torch/lib:${LD_LIBRARY_PATH}
+```
+
 ```bash
 export MIGRAPHX_ENABLE_GRAPHAPI_REDUCTION=1
 export MIGRAPHX_ENABLE_LAYERNORM_FUSION=1

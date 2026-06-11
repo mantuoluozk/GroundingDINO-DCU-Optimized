@@ -96,7 +96,8 @@ class MIGraphXModel:
             for k, v in self.model.get_outputs().items():
                 print(f"{k}: {v}")
 
-            print("\n⚙️ 编译模型（GPU + offload=false）")
+            print("\n⚙️ 编译模型(GPU + offload=False)")
+            migraphx.quantize_fp16(self.model)
             self.model.compile(
                 t=migraphx.get_target("gpu"),
                 offload_copy=False,
@@ -276,7 +277,7 @@ def benchmark_performance(
 if __name__ == "__main__":
 
     model_path = "../weights/ground_opt_0601.onnx"
-    cache_path = "../weights/ground_opt_0601.mxr"
+    cache_path = "../weights/ground_opt_0601_py.mxr"
     img_path = "../images/in/car_1.jpg"
 
     BOX_TRESHOLD = 0.35
