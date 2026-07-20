@@ -200,92 +200,133 @@ python onnx_inference_deform_optim.py
 
 -----
 
-## 7\. migraphx推理
+## 7\. MIGraphX 推理
 
-1. [环境准备](http://42.228.13.241:10068/wangwf/groundingdino)
+### 7.1 环境准备
 
-* 下载 [DTK-26.04-txpl-temp-0312-ubuntu20.04-x86_64](http://112.11.77.146:65182/jenkins/rocm/26.04/intel/ubuntu20.04/DTK-26.04-txpl-temp-0312-ubuntu20.04-x86_64.tar.gz) ，解压后替换掉原 /opt/dtk 目录。
-```bash
-tar -zxvf DTK-26.04-txpl-temp-0312-ubuntu20.04-x86_64.tar.gz -C /opt/
-rm /opt/dtk # 删除原来的软链接
-ln -s /opt/dtk-26.04-txpl-temp-0312 /opt/dtk # 创建新的软链接
-```
+MIGraphX 推理环境使用 DTK 26.04.2、MIGraphX 5.1.2，并需要正确配置
+hipDNN、hipBLASLt 及 PyTorch 动态库路径。完整安装包名称和替换步骤以交付环境中的
+MIGraphX 环境配置说明为准。
 
-* 替换hipdnn：
-```bash
-tar -zxvf package_resize.tar.gz
-cd package_resize
-cp -r install/lib/hipdnn_plugins /opt/dtk/lib/
-cp -r install/lib/libhipdnn_backend.so /opt/dtk/lib/
-rm -rf /opt/dtk/include/hipdnn
-cp -r install/include/hipdnn /opt/dtk/include/hipdnn
-rm -rf /opt/dtk/lib/cmake/hipdnn*
-cp -r install/lib/cmake/* /opt/dtk/lib/cmake/
-rm -f /opt/dtk/lib/hipdnn_plugins/engines/libmiopen_legacy_plugin.so
-```
+进入容器后激活 DTK，并配置运行时动态库：
 
-* 激活dtk
 ```bash
 source /opt/dtk/env.sh
 export LD_LIBRARY_PATH=/usr/local/lib/python3.10/dist-packages/torch/lib:${LD_LIBRARY_PATH}
 ```
 
-
-* 安装migraphx
-```bash
-chmod +x ./migraphx-5.1.2+das.opt1.ab9210b.dtk2604-cp310-cp310-manylinux_2_35_x86_64.run
-./migraphx-5.1.2+das.opt1.ab9210b.dtk2604-cp310-cp310-manylinux_2_35_x86_64.run
-```
-
-
-* 模型优化
-
-```bash
-cd weights
-onnxsim ground.onnx ground_sim.onnx
-cd migraphx_infer
-python modify_onnx_0601.py ../weights/ground_sim.onnx ../weights/ground_opt.onnx
-```
-
-
-
-2. 性能测试(编译加运行)
-先加入环境变量
-```bash
-export LD_LIBRARY_PATH=/usr/local/lib/python3.10/dist-packages/torch/lib:${LD_LIBRARY_PATH}
-```
+运行模型编译或推理前，启用以下优化开关：
 
 ```bash
 export MIGRAPHX_ENABLE_GRAPHAPI_REDUCTION=1
 export MIGRAPHX_ENABLE_LAYERNORM_FUSION=1
-migraphx-driver perf --onnx ground_opt.onnx --fp16 --output ground_opt.mxr
+export MIGRAPHX_ENABLE_GRAPHAPI_SOFTMAX=1
+export MIGRAPHX_ENABLE_GEMM_ACT_FUSION=1
 ```
 
-或者进入migraphx_infer文件夹，运行
+如需指定空闲物理 DCU，例如设备 5：
+
 ```bash
-cd migraphx_infer
-bash migraphx_export.bash
+export HIP_VISIBLE_DEVICES=5
+export ROCR_VISIBLE_DEVICES=5
 ```
 
-3. 如果已经得到了mxr文件，也可以直接测试
+### 7.2 生成优化 ONNX
+
+以下命令以 batch size 2 为例。batch size 1、4、8 只需替换文件名中的数字：
+
 ```bash
-bash migraphx_perf.bash
+cd /data/zk/GroundingDINO
+
+onnxsim \
+  weights/ground_bs2.onnx \
+  weights/ground_bs2_sim.onnx
+
+python migraphx_infer/modify_onnx_0720.py \
+  weights/ground_bs2_sim.onnx \
+  weights_0720/ground_bs2_opt.onnx
 ```
 
-4. 使用python脚本测试
+`modify_onnx_0720.py` 会从静态 ONNX 输入中自动解析 batch size。对于 batch size
+大于 1 的模型，脚本会正确还原 attention head 数量，并跳过仅适用于 batch size 1
+的自定义 GemmAct 图融合。
 
-需要提前配置环境变量
+### 7.3 编译 MXR
+
 ```bash
-export PYTHONPATH=/opt/dtk/lib:$PYTHONPATH
-```
-运行脚本
-```bash
-python migraphx_infer.py  
-# offload=False推理，提前开辟gpu空间，数据放在device推理
+cd /data/zk/GroundingDINO/migraphx_infer
 
-python migraphx_infer1.py 
-# offload=True推理，会慢一些
+migraphx-driver perf \
+  --onnx ../weights_0720/ground_bs2_opt.onnx \
+  --fp16 \
+  --output ../weights_0720/ground_bs2_opt.mxr
 ```
+
+MXR 是与输入 shape、DCU 架构及 MIGraphX/DTK 环境相关的静态编译产物。交付时应
+记录 batch size、输入分辨率、目标 DCU 架构和软件版本，避免跨环境直接复用。
+
+### 7.4 Python 推理与性能测试
+
+`migraphx_infer/migraphx_infer.py` 不依赖已安装的 `groundingdino` Python 包，
+图像预处理由 OpenCV 和 NumPy 完成。下面以 batch size 2、输入分辨率 800x1200
+为例：
+
+```bash
+cd /data/zk/GroundingDINO/migraphx_infer
+
+python migraphx_infer.py \
+  --model_path ../weights_0720/ground_bs2_opt.mxr \
+  --image_path ../images/in/car_1.jpg \
+  --image_size 800 1200 \
+  --caption "car ." \
+  --save_path ../weights_0720/result_bs2.jpg \
+  --warmup_runs 20 \
+  --test_runs 100
+```
+
+主要参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| `--model_path` | 已编译的静态 `.mxr` 模型路径，必填 |
+| `--image_path` | 输入图片路径 |
+| `--image_size HEIGHT WIDTH` | 图像预处理尺度，顺序为高度、宽度 |
+| `--caption` | 文本提示词；当前静态文本输入仅支持 `car .` |
+| `--save_path` | 检测结果图保存路径 |
+| `--warmup_runs` | 不计入性能结果的预热次数 |
+| `--test_runs` | 正式性能测试次数 |
+
+脚本会从 MXR 的 `img` 输入自动读取并打印 batch size 和静态输入分辨率。
+`--image_size` 必须与模型编译时的输入分辨率一致，否则脚本将在推理前报错。
+
+#### 推理链路端到端性能口径
+
+图片读取、resize 和归一化在正式 benchmark 之前完成，不计入性能数据。正式统计
+范围为：
+
+```text
+batch 图像张量和固定文本输入构造
+→ CPU 到 GPU
+→ MIGraphX 模型执行
+→ GPU 到 CPU
+→ sigmoid 和阈值后处理
+```
+
+模型加载、图片读取/解码、resize、归一化、预热、检测框绘制和结果图片写盘均不计入
+该指标。该结果应在交付报告中称为“推理链路端到端延迟与吞吐量”，不能简称为包含
+图片 I/O 和预处理的应用端到端性能。
+
+bs>1 时，脚本会把同一张预处理图片和同一组固定文本输入复制到整个 batch；结果图
+和检测后处理使用 batch 中第一项。
+
+吞吐量计算方式为：
+
+```text
+images/s = batch_size * test_runs / 正式测试推理链路总耗时
+```
+
+报告同时输出平均延迟、标准差、P50、P90、P95、最小/最大延迟和 images/s。
+交付测试报告中应同时记录测试次数、设备编号、batch size 和输入分辨率。
 
 
 -----
