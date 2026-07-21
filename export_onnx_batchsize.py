@@ -1,6 +1,7 @@
 import torch
 import onnx
-from onnxsim import simplify
+import argparse
+import os
 
 from groundingdino.models import build_model
 from groundingdino.util.slconfig import SLConfig
@@ -8,6 +9,16 @@ from groundingdino.util.utils import clean_state_dict
 
 config_file = './groundingdino/config/GroundingDINO_SwinB_cfg.py'
 checkpoint_path = './weights/groundingdino_swinb_cogcoor.pth'
+
+parser = argparse.ArgumentParser(description="Export a static-batch GroundingDINO ONNX model")
+parser.add_argument("--batch_size", type=int, required=True)
+parser.add_argument("--image_height", type=int, required=True)
+parser.add_argument("--image_width", type=int, required=True)
+parser.add_argument("--output_path", type=str, required=True)
+args = parser.parse_args()
+
+if args.batch_size <= 0 or args.image_height <= 0 or args.image_width <= 0:
+    parser.error("batch size and image dimensions must be greater than 0")
 
 def load_model(model_config_path, model_checkpoint_path, cpu_only=False):
     args = SLConfig.fromfile(model_config_path)
@@ -26,17 +37,16 @@ def load_model(model_config_path, model_checkpoint_path, cpu_only=False):
 # 加载模型
 model = load_model(config_file, checkpoint_path, cpu_only=True)
 
-# ===================== 核心修改：batch_size=4 =====================
-BATCH_SIZE = 8
+BATCH_SIZE = args.batch_size
 # 正式推理时使用的提示词，以及相关的mask
 caption = "car ."
 
-# 1. 文本输入扩展到batch_size=4
+# 1. 文本输入扩展到指定 batch size
 # 重复caption BATCH_SIZE次，构建批量文本输入
 input_ids = model.tokenizer([caption]*BATCH_SIZE, return_tensors="pt", padding="longest")["input_ids"]
 seq_len = input_ids.shape[1]  # 获取序列长度（适配不同caption）
 
-# 2. 扩展position_ids到batch_size=4
+# 2. 扩展 position_ids
 position_ids = torch.tensor([[0, 0, 1, 0]]).repeat(BATCH_SIZE, 1)
 # 确保position_ids长度匹配seq_len（截断/补零）
 if position_ids.shape[1] < seq_len:
@@ -45,7 +55,7 @@ if position_ids.shape[1] < seq_len:
 else:
     position_ids = position_ids[:, :seq_len]
 
-# 3. 扩展token_type_ids到batch_size=4
+# 3. 扩展 token_type_ids
 token_type_ids = torch.tensor([[0, 0, 0, 0]]).repeat(BATCH_SIZE, 1)
 if token_type_ids.shape[1] < seq_len:
     pad_len = seq_len - token_type_ids.shape[1]
@@ -53,7 +63,7 @@ if token_type_ids.shape[1] < seq_len:
 else:
     token_type_ids = token_type_ids[:, :seq_len]
 
-# 4. 扩展attention_mask到batch_size=4
+# 4. 扩展 attention_mask
 attention_mask = torch.tensor([[True, True, True, True]]).repeat(BATCH_SIZE, 1)
 if attention_mask.shape[1] < seq_len:
     pad_len = seq_len - attention_mask.shape[1]
@@ -61,7 +71,7 @@ if attention_mask.shape[1] < seq_len:
 else:
     attention_mask = attention_mask[:, :seq_len]
 
-# 5. 扩展text_token_mask到batch_size=4
+# 5. 扩展 text_token_mask
 text_token_mask = torch.tensor([[[True, False, False, False],
                                  [False,  True,  True,  False],
                                  [False,  True,  True,  False],
@@ -77,12 +87,12 @@ if text_token_mask.shape[1] < seq_len:
 else:
     text_token_mask = text_token_mask[:, :seq_len, :seq_len]
 
-# 6. 扩展图像输入到batch_size=4 (1,3,800,1200) -> (4,3,800,1200)
-img = torch.randn(BATCH_SIZE, 3, 800, 1200)
+# 6. 构造指定 batch size 和分辨率的静态图像输入
+img = torch.randn(BATCH_SIZE, 3, args.image_height, args.image_width)
 
-# 打印输入形状，验证batch_size=8
+# 打印输入形状
 print("="*50)
-print("输入形状验证（batch_size=8）:")
+print(f"输入形状验证（batch_size={BATCH_SIZE}）:")
 print(f"img: {img.shape}")
 print(f"input_ids: {input_ids.shape}")
 print(f"attention_mask: {attention_mask.shape}")
@@ -104,8 +114,8 @@ dynamic_axes = {
 }
 
 # 导出原始ONNX模型
-onnx_output_path = "weights/ground_bs8.onnx"
-simplified_onnx_path = "weights/ground_simplified_bs8.onnx"
+onnx_output_path = args.output_path
+os.makedirs(os.path.dirname(os.path.abspath(onnx_output_path)), exist_ok=True)
 
 torch.onnx.export(
     model,

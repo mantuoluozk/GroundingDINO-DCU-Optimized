@@ -204,15 +204,44 @@ python onnx_inference_deform_optim.py
 
 ### 7.1 环境准备
 
-MIGraphX 推理环境使用 DTK 26.04.2、MIGraphX 5.1.2，并需要正确配置
-hipDNN、hipBLASLt 及 PyTorch 动态库路径。完整安装包名称和替换步骤以交付环境中的
-MIGraphX 环境配置说明为准。
+MIGraphX 推理环境使用 DTK 26.04.2 和 MIGraphX 5.1.2，并需要正确配置 hipDNN、
+hipBLASLt 及 PyTorch 动态库路径。
+
+下载并解压 [dtk-26.04.2-ubuntu20.04_0624](http://42.228.13.241:21000/jenkins/rocm/temp/dtk/dtk-26.04.2-ubuntu20.04_0624.tar.gz)，
+使用解压目录替换容器中的 `/opt/dtk`。
+
+替换 hipDNN 文件：
+
+```bash
+tar -zxvf hipdnn_files.tar.gz
+cp hipdnn_files/kernel_asm.hipfb /opt/dtk/lib/
+cp hipdnn_files/kernel_hip.hipfb /opt/dtk/lib/
+cp hipdnn_files/libhipnn.so.1 /opt/dtk/lib/
+rm -f /opt/dtk/lib/libhipnn.so
+ln -s /opt/dtk/lib/libhipnn.so.1 /opt/dtk/lib/libhipnn.so
+```
 
 进入容器后激活 DTK，并配置运行时动态库：
 
 ```bash
 source /opt/dtk/env.sh
 export LD_LIBRARY_PATH=/usr/local/lib/python3.10/dist-packages/torch/lib:${LD_LIBRARY_PATH}
+```
+
+解压并配置 hipBLASLt。下面的环境变量需要在后续模型编译和推理使用的同一终端中
+保持有效：
+
+```bash
+tar -zxvf hipblaslt-install.tar.gz
+export LD_LIBRARY_PATH=$(pwd)/hipblaslt-install/lib:${LD_LIBRARY_PATH}
+```
+
+安装 MIGraphX：
+
+```bash
+cd /path/to/migraphx_run/dir
+chmod +x migraphx-5.1.2+das.opt1.ab9210b.dtk2604-cp310-cp310-manylinux_2_35_x86_64.run
+./migraphx-5.1.2+das.opt1.ab9210b.dtk2604-cp310-cp310-manylinux_2_35_x86_64.run
 ```
 
 运行模型编译或推理前，启用以下优化开关：
@@ -328,6 +357,70 @@ images/s = batch_size * test_runs / 正式测试推理链路总耗时
 报告同时输出平均延迟、标准差、P50、P90、P95、最小/最大延迟和 images/s。
 交付测试报告中应同时记录测试次数、设备编号、batch size 和输入分辨率。
 
+### 7.5 544x960 分辨率测试流程
+
+`export_onnx_batchsize.py` 支持通过命令行指定 batch size、输入分辨率和输出路径。
+当前已完成并验证 bs=1，生成静态 ONNX：
+
+```bash
+cd /data/zk/GroundingDINO
+mkdir -p weights_544x960
+
+python export_onnx_batchsize.py \
+  --batch_size 1 \
+  --image_height 544 \
+  --image_width 960 \
+  --output_path weights_544x960/ground_bs1.onnx
+```
+
+执行 ONNX 简化和结构优化：
+
+```bash
+python -m onnxsim \
+  weights_544x960/ground_bs1.onnx \
+  weights_544x960/ground_bs1_sim.onnx
+
+python migraphx_infer/modify_onnx_0720.py \
+  weights_544x960/ground_bs1_sim.onnx \
+  weights_544x960/ground_bs1_opt.onnx
+```
+
+在选定的空闲 DCU 上编译 MXR：
+
+```bash
+cd /data/zk/GroundingDINO/migraphx_infer
+
+migraphx-driver perf \
+  --onnx ../weights_544x960/ground_bs1_opt.onnx \
+  --fp16 \
+  --output ../weights_544x960/ground_bs1_opt.mxr
+```
+
+使用已编译的 MXR 进行 `migraphx-driver` 性能测试：
+
+```bash
+migraphx-driver perf \
+  --migraphx ../weights_544x960/ground_bs1_opt.mxr \
+  -n 100
+```
+
+使用 Python 推理链路进行测试。脚本会自动从 MXR 读取 batch size：
+
+```bash
+python migraphx_infer.py \
+  --model_path ../weights_544x960/ground_bs1_opt.mxr \
+  --image_path ../images/in/car_1.jpg \
+  --image_size 544 960 \
+  --caption "car ." \
+  --save_path ../weights_544x960/result_bs1.jpg \
+  --warmup_runs 20 \
+  --test_runs 100
+```
+
+两种方式统计范围不同：`migraphx-driver` 主要反映 MIGraphX 模型执行性能，
+`migraphx_infer.py` 还包含输入张量构造、H2D、D2H 和检测后处理。测试报告中应分别
+列出，不能将两者作为同一统计口径直接替代。
+
 
 -----
 ## 8\. 测试结果对比
@@ -377,6 +470,28 @@ images/s = batch_size * test_runs / 正式测试推理链路总耗时
 | BW100 | Python + MIGraphX（device） | 19.39 | 
 | K100_AI | migraphx-driver | 19.26 | 
 | K100_AI | Python + MIGraphX（device） | 15.90 | 
+
+#### BW100 800x1200 多 batch 测试结果（0720 MIGraphX 版本）
+
+| Batch size | `migraphx-driver`（FPS） | Python 推理链路端到端（images/s） |
+| :---: | :---: | :---: |
+| 1 | 23.856 | 21.12 |
+| 2 | 26.208 | 21.39 |
+| 4 | 28.891 | 24.53 |
+| 8 | 30.374 | 23.82 |
+
+> `migraphx-driver` 与 Python 脚本统计范围不同。前者主要反映模型执行性能；后者还
+> 包含输入张量构造、CPU/GPU 数据搬运和检测后处理，因此数值不应直接等同。
+
+#### BW100 544x960 bs=1 测试结果（0720 MIGraphX 版本）
+
+正式测试均执行 100 次；Python 推理链路在正式测试前额外预热 20 次。
+
+| Batch size | `migraphx-driver`（FPS） | Python 推理链路（images/s） |
+| :---: | :---: | :---: |
+| 1 | 35.480 | 28.41 |
+
+`migraphx-driver` 平均延迟为 28.28 ms，Python 推理链路平均延迟为 35.20 ms。
 
 
 -----
