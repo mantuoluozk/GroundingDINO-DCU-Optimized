@@ -208,7 +208,17 @@ MIGraphX 推理环境使用 DTK 26.04.2 和 MIGraphX 5.1.2，并需要正确配�
 hipBLASLt 及 PyTorch 动态库路径。
 
 下载并解压 [dtk-26.04.2-ubuntu20.04_0624](http://42.228.13.241:21000/jenkins/rocm/temp/dtk/dtk-26.04.2-ubuntu20.04_0624.tar.gz)，
-使用解压目录替换容器中的 `/opt/dtk`。
+将解压后的 DTK 目录放置为 `/opt/dtk-dtk-26.04.2-ubuntu20.04_0624`，然后删除原有
+`/opt/dtk` 软链接并指向新目录：
+
+```bash
+rm /opt/dtk
+ln -s /opt/dtk-dtk-26.04.2-ubuntu20.04_0624 /opt/dtk
+ls -l /opt/dtk
+```
+
+`ls -l` 的输出应显示 `/opt/dtk` 已指向
+`/opt/dtk-dtk-26.04.2-ubuntu20.04_0624`。
 
 替换 hipDNN 文件：
 
@@ -257,7 +267,6 @@ export MIGRAPHX_ENABLE_GEMM_ACT_FUSION=1
 
 ```bash
 export HIP_VISIBLE_DEVICES=5
-export ROCR_VISIBLE_DEVICES=5
 ```
 
 ### 7.2 生成优化 ONNX
@@ -360,18 +369,33 @@ images/s = batch_size * test_runs / 正式测试推理链路总耗时
 ### 7.5 544x960 分辨率测试流程
 
 `export_onnx_batchsize.py` 支持通过命令行指定 batch size、输入分辨率和输出路径。
-当前已完成并验证 bs=1，生成静态 ONNX：
+以下命令分别导出 bs=1、2、4、8 的 544x960 静态 ONNX：
 
 ```bash
 cd /data/zk/GroundingDINO
 mkdir -p weights_544x960
 
+for bs in 1 2 4 8; do
+  python export_onnx_batchsize.py \
+    --batch_size ${bs} \
+    --image_height 544 \
+    --image_width 960 \
+    --output_path weights_544x960/ground_bs${bs}.onnx
+done
+```
+
+也可以只导出指定 batch size。例如导出 bs=2：
+
+```bash
 python export_onnx_batchsize.py \
-  --batch_size 1 \
+  --batch_size 2 \
   --image_height 544 \
   --image_width 960 \
-  --output_path weights_544x960/ground_bs1.onnx
+  --output_path weights_544x960/ground_bs2.onnx
 ```
+
+将 `--batch_size` 和输出文件名中的数字改为 `4` 或 `8`，即可分别导出 bs=4、bs=8。
+当前 544x960 性能数据仅完成并验证了 bs=1；bs=2、4、8 的命令用于后续模型导出。
 
 执行 ONNX 简化和结构优化：
 
