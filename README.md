@@ -301,8 +301,7 @@ done
 
 `modify_onnx.py` 会从静态 ONNX 输入中自动解析 batch size，并对 bs=1、2、4、8
 执行相同的 GemmAct 图融合。本轮生成的八个优化 ONNX 均包含 24 个 `GemmAct`
-节点。`modify_onnx_0720.py` 是旧版兼容脚本，其中多 batch 会跳过该融合，不再用于
-新版性能测试。
+节点。项目只保留该最新版优化脚本，避免误用旧版多 batch 跳过逻辑。
 
 `migraphx_infer/onnx_extract.py` 是可选的 ONNX 子图提取工具，不参与上述完整模型
 优化与性能测试流程。
