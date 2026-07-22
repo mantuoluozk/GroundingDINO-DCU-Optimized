@@ -159,12 +159,16 @@ xiongke_log.txt
 migraphx_log.txt
 weights/
 weights_400x600/
+weights_0720/
+weights_544x960/
+weights_migraphx_new/
 checkpoints/
 
 # 忽略环境安装包
 *.whl
 *.tar.gz
 *.zip
+*.bak
 
 # 忽略缓存和临时文件
 __pycache__/

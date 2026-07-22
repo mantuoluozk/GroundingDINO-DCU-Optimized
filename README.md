@@ -207,6 +207,10 @@ python onnx_inference_deform_optim.py
 MIGraphX 推理环境使用 DTK 26.04.2 和 MIGraphX 5.1.2，并需要正确配置 hipDNN、
 hipBLASLt 及 PyTorch 动态库路径。
 
+多 batch GemmAct 融合需要使用已更新的 MIGraphX 构建。该构建的
+`migraphx-driver --version` 仍显示 `5.1.2`，但已经支持 bs=2、4、8 的
+`gpu::graphapi_gemm_act_fusion`，不能仅根据版本号判断是否包含该修复。
+
 下载并解压 [dtk-26.04.2-ubuntu20.04_0624](http://42.228.13.241:21000/jenkins/rocm/temp/dtk/dtk-26.04.2-ubuntu20.04_0624.tar.gz)，
 将解压后的 DTK 目录放置为 `/opt/dtk-dtk-26.04.2-ubuntu20.04_0624`，然后删除原有
 `/opt/dtk` 软链接并指向新目录：
@@ -271,33 +275,59 @@ export HIP_VISIBLE_DEVICES=5
 
 ### 7.2 生成优化 ONNX
 
-以下命令以 batch size 2 为例。batch size 1、4、8 只需替换文件名中的数字：
+下面以 800x1200 为例，依次简化并优化 bs=1、2、4、8 的静态 ONNX：
 
 ```bash
 cd /data/zk/GroundingDINO
 
-onnxsim \
-  weights/ground_bs2.onnx \
-  weights/ground_bs2_sim.onnx
+mkdir -p weights_migraphx_new/800x1200
 
-python migraphx_infer/modify_onnx_0720.py \
-  weights/ground_bs2_sim.onnx \
-  weights_0720/ground_bs2_opt.onnx
+for bs in 1 2 4 8; do
+  python export_onnx_batchsize.py \
+    --batch_size ${bs} \
+    --image_height 800 \
+    --image_width 1200 \
+    --output_path weights/ground_bs${bs}.onnx
+
+  python -m onnxsim \
+    weights/ground_bs${bs}.onnx \
+    weights/ground_bs${bs}_sim.onnx
+
+  python migraphx_infer/modify_onnx.py \
+    weights/ground_bs${bs}_sim.onnx \
+    weights_migraphx_new/800x1200/ground_bs${bs}_opt.onnx
+done
 ```
 
-`modify_onnx_0720.py` 会从静态 ONNX 输入中自动解析 batch size。对于 batch size
-大于 1 的模型，脚本会正确还原 attention head 数量，并跳过仅适用于 batch size 1
-的自定义 GemmAct 图融合。
+`modify_onnx.py` 会从静态 ONNX 输入中自动解析 batch size，并对 bs=1、2、4、8
+执行相同的 GemmAct 图融合。本轮生成的八个优化 ONNX 均包含 24 个 `GemmAct`
+节点。`modify_onnx_0720.py` 是旧版兼容脚本，其中多 batch 会跳过该融合，不再用于
+新版性能测试。
+
+`migraphx_infer/onnx_extract.py` 是可选的 ONNX 子图提取工具，不参与上述完整模型
+优化与性能测试流程。
 
 ### 7.3 编译 MXR
 
 ```bash
 cd /data/zk/GroundingDINO/migraphx_infer
 
-migraphx-driver perf \
-  --onnx ../weights_0720/ground_bs2_opt.onnx \
-  --fp16 \
-  --output ../weights_0720/ground_bs2_opt.mxr
+for bs in 1 2 4 8; do
+  migraphx-driver perf \
+    --onnx ../weights_migraphx_new/800x1200/ground_bs${bs}_opt.onnx \
+    --fp16 \
+    --output ../weights_migraphx_new/800x1200/ground_bs${bs}_opt.mxr
+done
+```
+
+对保存后的 MXR 统一执行 100 次 Driver 性能测试：
+
+```bash
+for bs in 1 2 4 8; do
+  migraphx-driver perf \
+    --migraphx ../weights_migraphx_new/800x1200/ground_bs${bs}_opt.mxr \
+    -n 100
+done
 ```
 
 MXR 是与输入 shape、DCU 架构及 MIGraphX/DTK 环境相关的静态编译产物。交付时应
@@ -313,11 +343,11 @@ MXR 是与输入 shape、DCU 架构及 MIGraphX/DTK 环境相关的静态编译�
 cd /data/zk/GroundingDINO/migraphx_infer
 
 python migraphx_infer.py \
-  --model_path ../weights_0720/ground_bs2_opt.mxr \
+  --model_path ../weights_migraphx_new/800x1200/ground_bs2_opt.mxr \
   --image_path ../images/in/car_1.jpg \
   --image_size 800 1200 \
   --caption "car ." \
-  --save_path ../weights_0720/result_bs2.jpg \
+  --save_path ../weights_migraphx_new/800x1200/result_bs2.jpg \
   --warmup_runs 20 \
   --test_runs 100
 ```
@@ -395,18 +425,21 @@ python export_onnx_batchsize.py \
 ```
 
 将 `--batch_size` 和输出文件名中的数字改为 `4` 或 `8`，即可分别导出 bs=4、bs=8。
-当前 544x960 性能数据仅完成并验证了 bs=1；bs=2、4、8 的命令用于后续模型导出。
 
 执行 ONNX 简化和结构优化：
 
 ```bash
-python -m onnxsim \
-  weights_544x960/ground_bs1.onnx \
-  weights_544x960/ground_bs1_sim.onnx
+mkdir -p weights_migraphx_new/544x960
 
-python migraphx_infer/modify_onnx_0720.py \
-  weights_544x960/ground_bs1_sim.onnx \
-  weights_544x960/ground_bs1_opt.onnx
+for bs in 1 2 4 8; do
+  python -m onnxsim \
+    weights_544x960/ground_bs${bs}.onnx \
+    weights_544x960/ground_bs${bs}_sim.onnx
+
+  python migraphx_infer/modify_onnx.py \
+    weights_544x960/ground_bs${bs}_sim.onnx \
+    weights_migraphx_new/544x960/ground_bs${bs}_opt.onnx
+done
 ```
 
 在选定的空闲 DCU 上编译 MXR：
@@ -414,31 +447,37 @@ python migraphx_infer/modify_onnx_0720.py \
 ```bash
 cd /data/zk/GroundingDINO/migraphx_infer
 
-migraphx-driver perf \
-  --onnx ../weights_544x960/ground_bs1_opt.onnx \
-  --fp16 \
-  --output ../weights_544x960/ground_bs1_opt.mxr
+for bs in 1 2 4 8; do
+  migraphx-driver perf \
+    --onnx ../weights_migraphx_new/544x960/ground_bs${bs}_opt.onnx \
+    --fp16 \
+    --output ../weights_migraphx_new/544x960/ground_bs${bs}_opt.mxr
+done
 ```
 
 使用已编译的 MXR 进行 `migraphx-driver` 性能测试：
 
 ```bash
-migraphx-driver perf \
-  --migraphx ../weights_544x960/ground_bs1_opt.mxr \
-  -n 100
+for bs in 1 2 4 8; do
+  migraphx-driver perf \
+    --migraphx ../weights_migraphx_new/544x960/ground_bs${bs}_opt.mxr \
+    -n 100
+done
 ```
 
 使用 Python 推理链路进行测试。脚本会自动从 MXR 读取 batch size：
 
 ```bash
-python migraphx_infer.py \
-  --model_path ../weights_544x960/ground_bs1_opt.mxr \
-  --image_path ../images/in/car_1.jpg \
-  --image_size 544 960 \
-  --caption "car ." \
-  --save_path ../weights_544x960/result_bs1.jpg \
-  --warmup_runs 20 \
-  --test_runs 100
+for bs in 1 2 4 8; do
+  python migraphx_infer.py \
+    --model_path ../weights_migraphx_new/544x960/ground_bs${bs}_opt.mxr \
+    --image_path ../images/in/car_1.jpg \
+    --image_size 544 960 \
+    --caption "car ." \
+    --save_path ../weights_migraphx_new/544x960/result_bs${bs}.jpg \
+    --warmup_runs 20 \
+    --test_runs 100
+done
 ```
 
 两种方式统计范围不同：`migraphx-driver` 主要反映 MIGraphX 模型执行性能，
@@ -449,7 +488,8 @@ python migraphx_infer.py \
 -----
 ## 8\. 测试结果对比
 
-*以下测试均包含 5 轮预热（Warmup）和 10 轮正式测试。*
+> 8.1～8.3 中的早期 ORT/MIGraphX 数据沿用原始测试记录；0722 新版 MIGraphX
+> 数据统一使用 100 次正式测试，Python 推理链路额外执行 20 次预热。
 
 > **📌 路径简写说明：**
 > 为保证表格排版简洁，下方表格中的路径已作简写：
@@ -516,6 +556,33 @@ python migraphx_infer.py \
 | 1 | 35.480 | 28.41 |
 
 `migraphx-driver` 平均延迟为 28.28 ms，Python 推理链路平均延迟为 35.20 ms。
+
+#### BW100 新版 MIGraphX 完整测试结果（0722）
+
+测试固定使用 DCU 5、FP16 和四个 MIGraphX 优化开关。`migraphx-driver` 对保存后的
+MXR 执行 100 次正式测试；Python 推理链路执行 20 次预热和 100 次正式测试。
+
+544x960：
+
+| Batch size | Driver（images/s） | Driver 平均延迟（ms） | Python（images/s） | Python 平均延迟（ms） | Python P50/P90/P95（ms） |
+| :---: | ---: | ---: | ---: | ---: | :---: |
+| 1 | 35.448 | 28.63 | 28.08 | 35.61 | 34.55 / 37.30 / 38.00 |
+| 2 | 43.669 | 45.81 | 37.29 | 53.63 | 53.51 / 53.72 / 54.20 |
+| 4 | 50.072 | 79.88 | 42.46 | 94.20 | 93.82 / 95.41 / 96.01 |
+| 8 | 52.429 | 152.42 | 45.47 | 175.96 | 175.49 / 177.05 / 179.39 |
+
+800x1200：
+
+| Batch size | Driver（images/s） | Driver 平均延迟（ms） | Python（images/s） | Python 平均延迟（ms） | Python P50/P90/P95（ms） |
+| :---: | ---: | ---: | ---: | ---: | :---: |
+| 1 | 22.156 | 45.14 | 19.04 | 52.53 | 52.41 / 52.55 / 52.65 |
+| 2 | 25.316 | 79.20 | 21.43 | 93.32 | 93.60 / 93.90 / 93.97 |
+| 4 | 27.292 | 146.66 | 23.88 | 167.52 | 166.72 / 169.25 / 171.06 |
+| 8 | 28.539 | 280.43 | 23.91 | 334.66 | 344.55 / 349.44 / 352.06 |
+
+两种方式的统计边界不同：Driver 主要衡量模型执行，Python 结果包含输入张量构造、
+H2D、MIGraphX、D2H 和检测后处理，不包含模型加载、图片读取/解码、resize、归一化、
+绘图和结果写盘。
 
 
 -----
