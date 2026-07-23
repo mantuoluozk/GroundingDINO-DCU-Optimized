@@ -207,10 +207,6 @@ python onnx_inference_deform_optim.py
 MIGraphX 推理环境使用 DTK 26.04.2 和 MIGraphX 5.1.2，并需要正确配置 hipDNN、
 hipBLASLt 及 PyTorch 动态库路径。
 
-多 batch GemmAct 融合需要使用已更新的 MIGraphX 构建。该构建的
-`migraphx-driver --version` 仍显示 `5.1.2`，但已经支持 bs=2、4、8 的
-`gpu::graphapi_gemm_act_fusion`，不能仅根据版本号判断是否包含该修复。
-
 下载并解压 [dtk-26.04.2-ubuntu20.04_0624](http://42.228.13.241:21000/jenkins/rocm/temp/dtk/dtk-26.04.2-ubuntu20.04_0624.tar.gz)，
 将解压后的 DTK 目录放置为 `/opt/dtk-dtk-26.04.2-ubuntu20.04_0624`，然后删除原有
 `/opt/dtk` 软链接并指向新目录：
@@ -299,9 +295,8 @@ for bs in 1 2 4 8; do
 done
 ```
 
-`modify_onnx.py` 会从静态 ONNX 输入中自动解析 batch size，并对 bs=1、2、4、8
-执行相同的 GemmAct 图融合。本轮生成的八个优化 ONNX 均包含 24 个 `GemmAct`
-节点。项目只保留该最新版优化脚本，避免误用旧版多 batch 跳过逻辑。
+`modify_onnx.py` 会从静态 ONNX 输入中自动解析 batch size，支持 bs=1、2、4、8
+的静态模型优化。
 
 `migraphx_infer/onnx_extract.py` 是可选的 ONNX 子图提取工具，不参与上述完整模型
 优化与性能测试流程。
