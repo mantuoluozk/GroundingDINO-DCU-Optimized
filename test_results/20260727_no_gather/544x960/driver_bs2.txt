@@ -1,0 +1,8 @@
+Batch size: 2
+Rate: 41.3653 inferences/sec
+Total time: 48.3497ms (Min: 48.0675ms, Max: 49.2839ms, Mean: 48.3776ms, Median: 48.3537ms)
+Percentiles (90%, 95%, 99%): (48.5778ms, 48.6933ms, 48.8827ms)
+Total instructions time: 88.1451ms
+Overhead time: 2.27253ms, -39.7954ms
+Overhead: 5%, -82%
+[ MIGraphX Version: 5.1.2 ] Complete: migraphx-driver perf --onnx ../weights_migraphx_no_gather/544x960/ground_bs2_opt.onnx --fp16 --output ../weights_migraphx_no_gather/544x960/ground_bs2_opt.mxr

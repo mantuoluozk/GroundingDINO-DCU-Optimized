@@ -1,0 +1,11 @@
+⚡ 直接加载缓存模型: /data/zk/GroundingDINO/weights_migraphx_no_gather/544x960/ground_bs4_opt.mxr
+✅ param_names: ['img', 'input_ids', 'token_type_ids', 'position_ids', 'text_token_mask', 'attention_mask', 'main:#output_0', 'main:#output_1']
+✅ input_shape: {'img': float_type, {4, 3, 544, 960}, {1566720, 522240, 960, 1}, 'input_ids': int64_type, {4, 4}, {4, 1}, 'attention_mask': bool_type, {4, 4}, {4, 1}, 'position_ids': int64_type, {4, 4}, {4, 1}, 'token_type_ids': int64_type, {4, 4}, {4, 1}, 'text_token_mask': bool_type, {4, 4, 4}, {16, 4, 1}}
+✅ output_shapes keys: ['boxes', 'logits']
+✅ batch size: 4
+✅ model image size (HxW): 544x960
+✅ 模型初始化完成
+sample=0 max=0.455622 boxes=6
+sample=1 max=0.455622 boxes=6
+sample=2 max=0.455622 boxes=6
+sample=3 max=0.455925 boxes=6

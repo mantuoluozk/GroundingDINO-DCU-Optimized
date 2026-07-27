@@ -1094,7 +1094,7 @@ def main():
     optimize_ms_deform_attn(om)      # 6. 融合多尺度可变形注意力
     # optimize_bidirect_attention(om)  # 7. 优化双向注意力
     optimize_matmul_nodes(om)         # 8. 融合并行matmul节点
-    optimize_gather_nodes(om)         # 9. gather节点替换为slice节点
+    # optimize_gather_nodes(om)       # 9. 已关闭：Gather 替换为 Slice 会导致部分模型精度异常
     optimize_gemm_act_nodes(om)       # 10. 融合gemm_act节点
     om.save(output_onnx_path, save_as_external_data=False)
 

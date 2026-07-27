@@ -1,0 +1,54 @@
+⚡ 直接加载缓存模型: ../weights_migraphx_no_gather/544x960/ground_bs8_opt.mxr
+✅ param_names: ['img', 'position_ids', 'input_ids', 'token_type_ids', 'text_token_mask', 'attention_mask', 'main:#output_0', 'main:#output_1']
+✅ input_shape: {'img': float_type, {8, 3, 544, 960}, {1566720, 522240, 960, 1}, 'input_ids': int64_type, {8, 4}, {4, 1}, 'attention_mask': bool_type, {8, 4}, {4, 1}, 'position_ids': int64_type, {8, 4}, {4, 1}, 'token_type_ids': int64_type, {8, 4}, {4, 1}, 'text_token_mask': bool_type, {8, 4, 4}, {16, 4, 1}}
+✅ output_shapes keys: ['boxes', 'logits']
+✅ batch size: 8
+✅ model image size (HxW): 544x960
+✅ 模型初始化完成
+
+=== Inference configuration ===
+Model: ../weights_migraphx_no_gather/544x960/ground_bs8_opt.mxr
+Batch size: 8
+Image size (HxW): 544x960
+Input image: ../images/in/car_1.jpg
+============================================================
+📊 开始性能测试（包含预热+实际推理）
+============================================================
+
+🔥 预热阶段（20 次）- 不计入性能统计
+
+预热完成 - 总耗时: 4.577 s, 平均每次: 228.87 ms
+
+🚀 实际推理测试阶段（100 次）- 统计性能指标
+
+============================================================
+📈 端到端推理性能报告
+============================================================
+统计范围: 输入构造 + H2D + MIGraphX + D2H + 后处理
+不包含: 模型加载、图片读取/缩放归一化、画框和保存
+Batch size: 8
+测试次数: 100 次
+总推理耗时: 18.169 s
+平均推理耗时: 181.69 ms (±1.87 ms)
+P50/P90/P95: 181.27 / 183.95 / 186.50 ms
+最大推理耗时: 189.75 ms
+最小推理耗时: 179.05 ms
+吞吐量: 44.03 images/s
+============================================================
+
+============================================================
+🎯 执行最终推理（带详细日志+保存结果）
+============================================================
+Inference time: 0.156s
+post time: 0.002s
+
+=== Debug Info ===
+Prediction logits shape: (900, 256)
+Prediction boxes shape: (900, 4)
+Max logit value: 0.4544
+Mean logit value: 0.0001
+
+🎯 执行最终推理并保存结果图
+
+✅ 结果已保存至: ../weights_migraphx_no_gather/544x960/result_bs8.jpg
+✅ 检测到目标: ['object', 'object', 'object', 'object', 'object', 'object'] (共 6 个)
